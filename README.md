@@ -47,7 +47,7 @@ Traditionally, AI-driven games suffer from "hallucinations" where the AI ignores
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/your-username/AIRPG.git
+   git clone https://github.com/Frosoore/AIRPG.git
    cd AIRPG
    ```
 
