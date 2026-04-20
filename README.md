@@ -1,3 +1,4 @@
+HEAD
 # AIRPG — AI Role Playing Game
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -10,11 +11,11 @@ No cloud servers. No data collection. Absolute player sovereignty.
 
 ---
 
-## 核心 Vision
+## Vision
 
 Traditionally, AI-driven games suffer from "hallucinations" where the AI ignores game rules or character stats. AIRPG solves this using an **Arbitrator** architecture: every narrative turn is validated against a deterministic SQLite state machine before being committed to the timeline.
 
-- **Local-First:** Designed for Ubuntu/Linux. Your stories and data never leave your machine.
+- **Local-First:** Designed for Linux. Your stories and data never leave your machine.
 - **Event Sourced:** Every action is an immutable event. Rewind the timeline to any previous turn with perfect state reconstruction.
 - **World Simulation:** A background "Chronicler" engine simulates off-screen factions and NPCs, ensuring the world feels alive and independent of the player.
 - **Sandbox Rules:** Define your own entities, stats, and JSON-based logic rules without writing code.
