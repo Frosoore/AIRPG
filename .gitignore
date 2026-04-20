@@ -18,3 +18,5 @@ debug_*.db*
 # IDEs
 .vscode/
 .idea/
+
+docs
