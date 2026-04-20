@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+.pytest_cache/
+
+# Databases (Local saves and universes)
+universes/
+vector/
+auto_backups/
+
+# Debug/Temp files at root (should be kept clean)
+debug_*.db*
+*.db-shm
+*.db-wal
+
+# IDEs
+.vscode/
+.idea/
