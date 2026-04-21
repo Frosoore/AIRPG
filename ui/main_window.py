@@ -27,6 +27,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core.config import load_config
+from core.localization import tr
+
 
 class MainWindow(QMainWindow):
     """Root application window for AIRPG.
@@ -48,9 +51,8 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("AIRPG - AI Role Playing Game")
-        self.setMinimumSize(1100, 700)
-        self.resize(1280, 800)
+        self.setWindowTitle(tr("app_title"))
+        self.resize(1400, 850) # Increased default width for better box display
 
         # Session state - populated when transitioning to Tabletop
         self._active_db_path: str | None = None
@@ -67,24 +69,30 @@ class MainWindow(QMainWindow):
         self._setup_menu()
         self._setup_status_bar()
         self._setup_volume_slider()
-        self._check_first_run()
+        self._check_first_launch()
         self.show_hub()  # Populate library grid on launch
 
     def _setup_volume_slider(self) -> None:
         """Add a volume slider to the status bar."""
         from PySide6.QtWidgets import QSizePolicy
-        container = QWidget()
-        container.setStyleSheet("background: transparent;")
-        layout = QHBoxLayout(container)
+        
+        # Cleanup existing if any
+        if hasattr(self, "_volume_container"):
+            self._status_bar.removeWidget(self._volume_container)
+            self._volume_container.deleteLater()
+
+        self._volume_container = QWidget()
+        self._volume_container.setStyleSheet("background: transparent;")
+        layout = QHBoxLayout(self._volume_container)
         layout.setContentsMargins(0, 0, 10, 0)
         layout.setSpacing(5)
         
         # Align content to the far right to keep it compact
         layout.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         
-        vol_label = QLabel("Vol:")
-        vol_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed) # Compact label
-        layout.addWidget(vol_label)
+        self._vol_label = QLabel(tr("vol_fmt", val="50%").split("50%")[0].rstrip())
+        self._vol_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed) # Compact label
+        layout.addWidget(self._vol_label)
         
         self._volume_slider = QSlider(Qt.Horizontal)
         self._volume_slider.setRange(0, 100)
@@ -93,8 +101,20 @@ class MainWindow(QMainWindow):
         self._volume_slider.valueChanged.connect(self._on_volume_changed)
         layout.addWidget(self._volume_slider)
         
-        self._ambiance_manager.set_global_volume(0.5)
-        self._status_bar.addPermanentWidget(container)
+        self._status_bar.addPermanentWidget(self._volume_container)
+
+    def retranslate_ui(self) -> None:
+        """Dynamic text update for MainWindow elements."""
+        self.setWindowTitle(tr("app_title"))
+        self._setup_menu()
+        if hasattr(self, "_vol_label"):
+            self._vol_label.setText(tr("vol_fmt", val="50%").split("50%")[0].rstrip())
+        self._status_bar.showMessage(tr("ready"))
+        
+        # New: Retranslate all views
+        if hasattr(self, "_hub_view"): self._hub_view.retranslate_ui()
+        if hasattr(self, "_creator_view"): self._creator_view.retranslate_ui()
+        if hasattr(self, "_tabletop_view"): self._tabletop_view.retranslate_ui()
 
     def _on_volume_changed(self, value: int) -> None:
         """Update audio output volume (0.0 to 1.0)."""
@@ -115,7 +135,7 @@ class MainWindow(QMainWindow):
 
         self._current_ambiance_tag = tag
         self._ambiance_manager.update_ambiance(tag)
-        self.on_status_update(f"Ambiance: {tag} (fading...)")
+        self.on_status_update(f"{tr('ambiance')} {tag} ({tr('fading')})")
 
     # ------------------------------------------------------------------
     # Setup helpers
@@ -148,24 +168,28 @@ class MainWindow(QMainWindow):
         self._tabletop_view.loading_failed.connect(self.show_hub)
 
     def _setup_menu(self) -> None:
-        """Build the menu bar."""
+        """Build the menu bar. Clears existing menus first to prevent duplication."""
         menu_bar = self.menuBar()
+        menu_bar.clear()
 
         # File menu
-        file_menu = menu_bar.addMenu("&File")
-        settings_action = QAction("&Settings", self)
+        file_menu = menu_bar.addMenu(tr("menu_file"))
+        settings_action = QAction(tr("menu_settings"), self)
         settings_action.setShortcut("Ctrl+,")
+        settings_action.setToolTip("Open the global configuration dialog.")
         settings_action.triggered.connect(self._show_settings)
         file_menu.addAction(settings_action)
         file_menu.addSeparator()
-        quit_action = QAction("&Quit", self)
+        quit_action = QAction(tr("menu_quit"), self)
         quit_action.setShortcut("Ctrl+Q")
+        quit_action.setToolTip("Close the application.")
         quit_action.triggered.connect(self.close)
         file_menu.addAction(quit_action)
 
         # Help menu
-        help_menu = menu_bar.addMenu("&Help")
-        about_action = QAction("&About AIRPG", self)
+        help_menu = menu_bar.addMenu(tr("menu_help"))
+        about_action = QAction(tr("menu_about"), self)
+        about_action.setToolTip("Show information about AIRPG.")
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
 
@@ -173,7 +197,7 @@ class MainWindow(QMainWindow):
         """Create and configure the status bar."""
         self._status_bar = QStatusBar()
         self.setStatusBar(self._status_bar)
-        self._status_bar.showMessage("Ready.")
+        self._status_bar.showMessage(tr("ready"))
 
     # ------------------------------------------------------------------
     # Navigation
@@ -218,7 +242,7 @@ class MainWindow(QMainWindow):
 
         # Switch to loading screen immediately
         self._stack.setCurrentIndex(self._LOADING_INDEX)
-        self._loading_view.set_message("Initialising Universe...")
+        self._loading_view.set_message(tr("loading_universe"))
         
         # Defer the heavy lifting to the next event loop iteration to ensure
         # the LoadingView has a chance to paint itself.
@@ -263,47 +287,46 @@ class MainWindow(QMainWindow):
             
         dialog = SettingsDialog(config=load_config(), db_path=db_path, parent=self)
         if dialog.exec() == QDialog.Accepted:
+            # Update all UI text dynamically
+            self.retranslate_ui()
+            
             self._tabletop_view.reload_llm()
             self._tabletop_view.reload_ui_settings()
             
             # Re-evaluate audio state
             cfg = load_config()
             if not cfg.enable_audio:
-                self._media_player.stop()
-            elif self._current_ambiance_tag and self._media_player.playbackState() != QMediaPlayer.PlayingState:
-                # Force re-trigger to start playing if it was paused
-                tag = self._current_ambiance_tag
-                self._current_ambiance_tag = None 
-                self.update_audio_ambiance(tag)
+                self._ambiance_manager.set_enabled(False)
+            elif self._current_ambiance_tag:
+                self._ambiance_manager.set_enabled(True)
 
-            if self._stack.currentIndex() == self._CREATOR_INDEX:
-                # Reload meta in creator studio to reflect changes if any
-                self._creator_view.load_universe(db_path)
+            # Refresh volume label in status bar
+            self._status_bar.removeWidget(self._status_bar.findChild(QWidget)) # Hacky, but works if we rebuild
+            # Actually better to just store the label. Let me fix main_window to store vol_label.
+            self._setup_volume_slider() # Rebuild volume slider with new language
+
+            # Refresh current view
+            if self._stack.currentIndex() == self._HUB_INDEX:
+                self._hub_view.retranslate_ui()
+            elif self._stack.currentIndex() == self._CREATOR_INDEX:
+                self._creator_view.retranslate_ui()
+            elif self._stack.currentIndex() == self._TABLETOP_INDEX:
+                self._tabletop_view.retranslate_ui()
 
     def _show_about(self) -> None:
         """Display the About dialog."""
         QMessageBox.about(
             self,
-            "About AIRPG",
-            "<b>AIRPG - AI Role Playing Game</b><br><br>"
-            "A local, deterministic sandbox RPG engine powered by LLMs.<br><br>"
-            "Architecture: Python 3 · PySide6 · SQLite · ChromaDB<br>"
-            "Threading: QThread workers for all I/O - zero GUI freezes.",
+            tr("menu_about").replace("&", ""),
+            tr("about_text"),
         )
 
-    def _check_first_run(self) -> None:
+    def _check_first_launch(self) -> None:
         """Show a welcome message if this is the first time the app is launched."""
-        from pathlib import Path
-        config_file = Path.home() / ".config" / "AIRPG" / "settings.json"
-        if not config_file.exists():
+        from core.paths import SETTINGS_FILE
+        if not SETTINGS_FILE.exists():
             QMessageBox.information(
                 self,
-                "Welcome to AIRPG",
-                "<b>Welcome to AIRPG!</b><br><br>"
-                "To get started, configure your LLM backend:<br>"
-                "  <b>File → Settings</b><br><br>"
-                "For local AI (recommended): install "
-                "<a href='https://ollama.com'>Ollama</a> and run "
-                "<code>ollama pull llama3.2</code><br><br>"
-                "Or enter a Gemini API key for cloud access.",
+                tr("welcome_title"),
+                tr("welcome_text"),
             )

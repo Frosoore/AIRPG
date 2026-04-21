@@ -1,465 +1,393 @@
 """
 ui/widgets/rule_editor.py
 
-Visual JSON rule builder for the Creator Studio.
-
-Exposes AND/OR condition trees and action rows as form widgets.
-No raw JSON is ever shown to the user.
-
-THREADING RULE: No I/O here.  Data in via populate() (DbWorker signal);
-data out via collect_data() (called before DbWorker save task).
+Visual editor for universe rules in the Creator Studio.
+Uses a main rule table and sub-tables for conditions and actions.
 """
 
 from __future__ import annotations
 
 import uuid
-
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt, Slot, Signal
 from PySide6.QtWidgets import (
     QComboBox,
-    QFormLayout,
-    QFrame,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
     QPushButton,
-    QScrollArea,
-    QSpinBox,
-    QSplitter,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
+    QHeaderView,
+    QAbstractItemView,
+    QGroupBox,
+    QSpinBox,
 )
+from core.localization import tr
 
 
 class RuleEditorWidget(QWidget):
-    """Visual rule builder for the Creator Studio Rules tab.
+    """Spreadsheet-like rule builder for the Creator Studio."""
 
-    Renders conditions as an AND/OR tree of clause rows and actions as
-    a list of typed action rows.  No raw JSON shown.
-
-    populate() receives list[dict] from DbWorker; collect_data() returns
-    list[dict] to be written by DbWorker - no I/O in this widget.
-    """
-
+    # Canonical keys
     _COMPARATORS: list[str] = ["<=", ">=", "==", "!=", "<", ">"]
     _ACTION_TYPES: list[str] = ["stat_change", "stat_set", "trigger_event", "set_status"]
+
+    changed = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._rules_data: list[dict] = []
-        self._condition_rows: list[_ConditionRow] = []
-        self._action_rows: list[_ActionRow] = []
-        self._selected_row: int = -1  # Row whose data is currently in the form
+        self._stat_defs: list[dict] = []
+        self._selected_row: int = -1
         self._setup_ui()
 
-    # ------------------------------------------------------------------
-    # Setup
-    # ------------------------------------------------------------------
-
     def _setup_ui(self) -> None:
-        layout = QHBoxLayout(self)
-        splitter = QSplitter(Qt.Horizontal)
+        layout = QVBoxLayout(self)
 
-        # Left - rule list
-        left = QWidget()
-        left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.addWidget(QLabel("<b>Rules</b>"))
+        # Header
+        self._header = QLabel(f"<b>{tr('tab_rules')}</b>")
+        layout.addWidget(self._header)
 
-        self._rule_list = QListWidget()
-        self._rule_list.currentRowChanged.connect(self._on_rule_selected)
-        left_layout.addWidget(self._rule_list)
+        # Input Row (Write before Add)
+        input_group = QHBoxLayout()
+        self._in_id = QLineEdit()
+        self._in_id.setPlaceholderText(tr("rule_id"))
+        self._in_priority = QSpinBox()
+        self._in_priority.setRange(0, 999)
+        self._in_target = QLineEdit()
+        self._in_target.setPlaceholderText(tr("placeholder_target"))
+        
+        self._add_btn = QPushButton(f"{tr('add')} +")
+        self._add_btn.setStyleSheet("background-color: #27ae60; font-weight: bold;")
+        self._add_btn.clicked.connect(self._on_add_clicked)
 
-        btn_row = QHBoxLayout()
-        add_btn = QPushButton("Add")
-        del_btn = QPushButton("Delete")
-        btn_row.addWidget(add_btn)
-        btn_row.addWidget(del_btn)
-        left_layout.addLayout(btn_row)
+        input_group.addWidget(self._in_id, 2)
+        input_group.addWidget(QLabel(tr("priority")))
+        input_group.addWidget(self._in_priority, 1)
+        input_group.addWidget(self._in_target, 2)
+        input_group.addWidget(self._add_btn, 1)
+        layout.addLayout(input_group)
 
-        add_btn.clicked.connect(self._on_add_rule)
-        del_btn.clicked.connect(self._on_delete_rule)
+        # Rules Table
+        self._table = QTableWidget(0, 3)
+        self._table.setHorizontalHeaderLabels([
+            tr("rule_id"), tr("priority"), tr("target")
+        ])
+        self._table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self._table.setSelectionBehavior(QAbstractItemView.SelectItems)
+        self._table.setAlternatingRowColors(True)
+        self._table.currentCellChanged.connect(lambda r, c, pr, pc: self._on_row_selected())
+        self._table.itemChanged.connect(self._on_item_changed)
+        layout.addWidget(self._table, 2) # Give more space to main table
 
-        # Right - rule form in a scroll area
-        right_scroll = QScrollArea()
-        right_scroll.setWidgetResizable(True)
-        right_widget = QWidget()
-        self._right_layout = QVBoxLayout(right_widget)
-        right_scroll.setWidget(right_widget)
-
-        # Basic fields
-        basic_form = QFormLayout()
-        self._id_input = QLineEdit()
-        self._priority_spin = QSpinBox()
-        self._priority_spin.setRange(0, 999)
-        self._target_input = QLineEdit()
-        self._target_input.setPlaceholderText("entity_id or *")
-        basic_form.addRow("Rule ID:", self._id_input)
-        basic_form.addRow("Priority:", self._priority_spin)
-        basic_form.addRow("Target Entity:", self._target_input)
-        self._right_layout.addLayout(basic_form)
-
-        # Conditions group
-        self._conditions_group = QGroupBox("Conditions")
-        self._conditions_layout = QVBoxLayout(self._conditions_group)
-
-        cond_top = QHBoxLayout()
-        cond_top.addWidget(QLabel("Operator:"))
+        # Bottom Panels: Conditions and Actions
+        bottom_layout = QHBoxLayout()
+        
+        # --- Conditions ---
+        self._cond_group = QGroupBox(tr("conditions"))
+        cond_layout = QVBoxLayout(self._cond_group)
+        
+        op_row = QHBoxLayout()
+        op_row.addWidget(QLabel(tr("operator")))
         self._operator_combo = QComboBox()
-        self._operator_combo.addItems(["AND", "OR"])
-        cond_top.addWidget(self._operator_combo)
-        cond_top.addStretch()
-        self._conditions_layout.addLayout(cond_top)
+        self._operator_combo.addItems([tr("and"), tr("or")])
+        self._operator_combo.currentIndexChanged.connect(lambda _: self.changed.emit())
+        op_row.addWidget(self._operator_combo)
+        op_row.addStretch()
+        cond_layout.addLayout(op_row)
+        
+        self._cond_table = QTableWidget(0, 3)
+        self._cond_table.setHorizontalHeaderLabels([tr("stat"), tr("comparator"), tr("value")])
+        self._cond_table.horizontalHeader().setStretchLastSection(True)
+        cond_layout.addWidget(self._cond_table)
+        
+        cond_btns = QHBoxLayout()
+        self._add_cond_btn = QPushButton(f"{tr('add_condition')} +")
+        self._rem_cond_btn = QPushButton(tr("remove"))
+        cond_btns.addWidget(self._add_cond_btn)
+        cond_btns.addWidget(self._rem_cond_btn)
+        cond_layout.addLayout(cond_btns)
+        
+        self._add_cond_btn.clicked.connect(self._on_add_cond_row)
+        self._rem_cond_btn.clicked.connect(self._on_rem_cond_row)
+        
+        bottom_layout.addWidget(self._cond_group)
 
-        self._clauses_container = QVBoxLayout()
-        self._conditions_layout.addLayout(self._clauses_container)
+        # --- Actions ---
+        self._act_group = QGroupBox(tr("actions"))
+        act_layout = QVBoxLayout(self._act_group)
+        
+        self._act_table = QTableWidget(0, 4)
+        self._act_table.setHorizontalHeaderLabels([tr("type"), tr("target"), tr("stat"), tr("value")])
+        self._act_table.horizontalHeader().setStretchLastSection(True)
+        act_layout.addWidget(self._act_table)
+        
+        act_btns = QHBoxLayout()
+        self._add_act_btn = QPushButton(f"{tr('add_action')} +")
+        self._rem_act_btn = QPushButton(tr("remove"))
+        act_btns.addWidget(self._add_act_btn)
+        act_btns.addWidget(self._rem_act_btn)
+        act_layout.addLayout(act_btns)
+        
+        self._add_act_btn.clicked.connect(self._on_add_act_row)
+        self._rem_act_btn.clicked.connect(self._on_rem_act_row)
+        
+        bottom_layout.addWidget(self._act_group)
+        
+        layout.addLayout(bottom_layout, 3)
 
-        add_clause_btn = QPushButton("Add Condition")
-        add_clause_btn.clicked.connect(self._on_add_condition)
-        self._conditions_layout.addWidget(add_clause_btn)
-        self._right_layout.addWidget(self._conditions_group)
-
-        # Actions group
-        self._actions_group = QGroupBox("Actions")
-        self._actions_layout = QVBoxLayout(self._actions_group)
-
-        self._actions_container = QVBoxLayout()
-        self._actions_layout.addLayout(self._actions_container)
-
-        add_action_btn = QPushButton("Add Action")
-        add_action_btn.clicked.connect(self._on_add_action)
-        self._actions_layout.addWidget(add_action_btn)
-        self._right_layout.addWidget(self._actions_group)
-        self._right_layout.addStretch()
-
-        splitter.addWidget(left)
-        splitter.addWidget(right_scroll)
-        splitter.setSizes([200, 500])
-        layout.addWidget(splitter)
+        # Global delete
+        self._del_rule_btn = QPushButton(tr("delete"))
+        self._del_rule_btn.setToolTip(f"{tr('delete')} (Del)")
+        self._del_rule_btn.clicked.connect(self._on_delete_rule)
+        layout.addWidget(self._del_rule_btn)
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
+    def retranslate_ui(self) -> None:
+        self._header.setText(f"<b>{tr('tab_rules')}</b>")
+        self._add_btn.setText(f"{tr('add')} +")
+        self._del_rule_btn.setText(tr("delete"))
+        
+        self._in_id.setPlaceholderText(tr("rule_id"))
+        self._in_target.setPlaceholderText(tr("placeholder_target"))
+        
+        self._table.setHorizontalHeaderLabels([tr("rule_id"), tr("priority"), tr("target")])
+        self._cond_group.setTitle(tr("conditions"))
+        self._act_group.setTitle(tr("actions"))
+        self._add_cond_btn.setText(f"{tr('add_condition')} +")
+        self._add_act_btn.setText(f"{tr('add_action')} +")
+        self._rem_cond_btn.setText(tr("remove"))
+        self._rem_act_btn.setText(tr("remove"))
+
     @Slot(list)
     def populate(self, rules: list[dict]) -> None:
-        """Populate the rule list from a list of rule dicts.
+        self._table.blockSignals(True)
+        self._table.setRowCount(0)
+        self._rules_data = [dict(r) for r in rules]
+        
+        for r in self._rules_data:
+            self._add_rule_row(r)
+            
+        self._table.blockSignals(False)
+        if self._table.rowCount() > 0:
+            self._table.setCurrentCell(0, 0)
 
-        Called by DbWorker.rules_loaded signal.
-
-        Args:
-            rules: List of rule dicts in canonical Rules Engine schema.
-        """
-        self._selected_row = -1
-        self._rules_data = rules
-        self._rule_list.clear()
-        for rule in rules:
-            self._rule_list.addItem(
-                f"[{rule.get('priority', 0)}] {rule.get('rule_id', '?')}"
-            )
-        if rules:
-            self._rule_list.setCurrentRow(0)
+    @Slot(list)
+    def set_stat_definitions(self, stat_defs: list[dict]) -> None:
+        self._stat_defs = stat_defs
+        # If a rule is selected, we might want to refresh its combos, but let's keep it simple
 
     def collect_data(self) -> list[dict]:
-        """Return the current form state as a list of rule dicts.
-
-        Called by CreatorStudioView.on_save_clicked().  No I/O.
-
-        Returns:
-            List of rule dicts in canonical Rules Engine JSON schema.
-        """
-        # Phase 7: Absolute Persistence Protocol - Sync and refresh UI label
-        self._sync_current_form()
-        return list(self._rules_data)
+        self._sync_subtables_from_ui()
+        # Update basic fields from main table
+        for r in range(self._table.rowCount()):
+            if r < len(self._rules_data):
+                self._rules_data[r]["rule_id"] = self._table.item(r, 0).text().strip()
+                self._rules_data[r]["priority"] = int(self._table.item(r, 1).text().strip() or 0)
+                self._rules_data[r]["target_entity"] = self._table.item(r, 2).text().strip()
+        return self._rules_data
 
     # ------------------------------------------------------------------
-    # Slots
+    # Implementation
     # ------------------------------------------------------------------
 
-    @Slot(int)
-    def _on_rule_selected(self, row: int) -> None:
-        """Flush the previous rule's form data, then load the new selection."""
-        # Flush before advancing _selected_row so sync targets the previous slot
-        self._sync_current_form()
-        self._selected_row = row
-
-        if row < 0 or row >= len(self._rules_data):
-            return
-        rule = self._rules_data[row]
-
-        self._id_input.setText(rule.get("rule_id", ""))
-        self._priority_spin.setValue(int(rule.get("priority", 0)))
-        self._target_input.setText(rule.get("target_entity", "*"))
-
-        # Conditions
-        self._clear_condition_rows()
-        conditions = rule.get("conditions", {})
-        operator = conditions.get("operator", "AND")
-        idx = self._operator_combo.findText(operator)
-        self._operator_combo.setCurrentIndex(max(0, idx))
-        for clause in conditions.get("clauses", []):
-            if "stat" in clause:
-                self._add_condition_row(
-                    clause.get("stat", ""),
-                    clause.get("comparator", "=="),
-                    str(clause.get("value", "")),
-                )
-
-        # Actions
-        self._clear_action_rows()
-        for action in rule.get("actions", []):
-            self._add_action_row(
-                action.get("type", "stat_change"),
-                action.get("target", ""),
-                action.get("stat", ""),
-                str(action.get("delta", action.get("value", ""))),
-            )
+    def _add_rule_row(self, rule: dict) -> None:
+        row = self._table.rowCount()
+        self._table.insertRow(row)
+        
+        it_id = QTableWidgetItem(rule.get("rule_id", ""))
+        it_prio = QTableWidgetItem(str(rule.get("priority", 0)))
+        it_target = QTableWidgetItem(rule.get("target_entity", "*"))
+        
+        self._table.setItem(row, 0, it_id)
+        self._table.setItem(row, 1, it_prio)
+        self._table.setItem(row, 2, it_target)
 
     @Slot()
-    def _on_add_rule(self) -> None:
-        """Flush current form then add a blank rule."""
-        self._sync_current_form()
+    def _on_add_clicked(self) -> None:
+        rid = self._in_id.text().strip() or f"rule_{uuid.uuid4().hex[:6]}"
+        prio = self._in_priority.value()
+        target = self._in_target.text().strip() or "*"
+        
         new_rule = {
-            "rule_id": f"rule_{uuid.uuid4().hex[:6]}",
-            "priority": len(self._rules_data),
-            "target_entity": "*",
+            "rule_id": rid,
+            "priority": prio,
+            "target_entity": target,
             "conditions": {"operator": "AND", "clauses": []},
-            "actions": [],
+            "actions": []
         }
         self._rules_data.append(new_rule)
-        self._rule_list.addItem(
-            f"[{new_rule['priority']}] {new_rule['rule_id']}"
-        )
-        self._rule_list.setCurrentRow(len(self._rules_data) - 1)
+        self._add_rule_row(new_rule)
+        self._in_id.clear()
+        self._in_target.clear()
+        self._table.setCurrentCell(self._table.rowCount()-1, 0)
+        self.changed.emit()
+
+    @Slot()
+    def _on_row_selected(self) -> None:
+        self._sync_subtables_from_ui()
+        row = self._table.currentRow()
+        self._selected_row = row
+        
+        self._cond_table.setRowCount(0)
+        self._act_table.setRowCount(0)
+        
+        if row < 0 or row >= len(self._rules_data):
+            return
+            
+        rule = self._rules_data[row]
+        
+        # Operator
+        conds = rule.get("conditions", {})
+        op = str(conds.get("operator", "AND")).upper()
+        self._operator_combo.setCurrentIndex(0 if op == "AND" else 1)
+        
+        for clause in conds.get("clauses", []):
+            self._add_cond_table_row(clause)
+            
+        for action in rule.get("actions", []):
+            self._add_act_table_row(action)
+
+    def _add_cond_table_row(self, clause: dict) -> None:
+        r = self._cond_table.rowCount()
+        self._cond_table.insertRow(r)
+        
+        # Stat Dropdown (The FIX for Task 10)
+        stat_combo = QComboBox()
+        stat_names = [s["name"] for s in self._stat_defs]
+        val_stat = clause.get("stat", "")
+        if val_stat and val_stat not in stat_names: stat_names.insert(0, val_stat)
+        stat_combo.addItems(stat_names)
+        stat_combo.setCurrentText(val_stat)
+        self._cond_table.setCellWidget(r, 0, stat_combo)
+        stat_combo.currentTextChanged.connect(lambda _: self.changed.emit())
+        
+        # Comparator
+        comp_combo = QComboBox()
+        comp_combo.addItems(self._COMPARATORS)
+        comp_combo.setCurrentText(clause.get("comparator", "=="))
+        self._cond_table.setCellWidget(r, 1, comp_combo)
+        comp_combo.currentTextChanged.connect(lambda _: self.changed.emit())
+        
+        # Value
+        it_val = QTableWidgetItem(str(clause.get("value", "")))
+        self._cond_table.setItem(r, 2, it_val)
+
+    def _add_act_table_row(self, action: dict) -> None:
+        r = self._act_table.rowCount()
+        self._act_table.insertRow(r)
+        
+        # Type
+        type_combo = QComboBox()
+        for atype in self._ACTION_TYPES:
+            type_combo.addItem(tr(f"action_{atype}"), atype)
+        type_combo.setCurrentIndex(max(0, type_combo.findData(action.get("type", "stat_change"))))
+        self._act_table.setCellWidget(r, 0, type_combo)
+        type_combo.currentIndexChanged.connect(lambda _: self.changed.emit())
+        
+        # Target
+        it_target = QTableWidgetItem(action.get("target", ""))
+        self._act_table.setItem(r, 1, it_target)
+        
+        # Stat (FIX)
+        stat_combo = QComboBox()
+        stat_names = [s["name"] for s in self._stat_defs]
+        val_stat = action.get("stat", "")
+        if val_stat and val_stat not in stat_names: stat_names.insert(0, val_stat)
+        stat_combo.addItems(stat_names)
+        stat_combo.setCurrentText(val_stat)
+        self._act_table.setCellWidget(r, 2, stat_combo)
+        stat_combo.currentTextChanged.connect(lambda _: self.changed.emit())
+        
+        # Value
+        it_val = QTableWidgetItem(str(action.get("delta", action.get("value", ""))))
+        self._act_table.setItem(r, 3, it_val)
+
+    def _sync_subtables_from_ui(self) -> None:
+        if self._selected_row < 0 or self._selected_row >= len(self._rules_data):
+            return
+            
+        # Conditions
+        clauses = []
+        for r in range(self._cond_table.rowCount()):
+            stat_w = self._cond_table.cellWidget(r, 0)
+            comp_w = self._cond_table.cellWidget(r, 1)
+            val_it = self._cond_table.item(r, 2)
+            
+            if isinstance(stat_w, QComboBox) and isinstance(comp_w, QComboBox) and val_it:
+                clauses.append({
+                    "stat": stat_w.currentText(),
+                    "comparator": comp_w.currentText(),
+                    "value": val_it.text().strip()
+                })
+        
+        # Actions
+        actions = []
+        for r in range(self._act_table.rowCount()):
+            type_w = self._act_table.cellWidget(r, 0)
+            target_it = self._act_table.item(r, 1)
+            stat_w = self._act_table.cellWidget(r, 2)
+            val_it = self._act_table.item(r, 3)
+            
+            if isinstance(type_w, QComboBox) and target_it and isinstance(stat_w, QComboBox) and val_it:
+                atype = type_w.currentData()
+                act = {
+                    "type": atype,
+                    "target": target_it.text().strip(),
+                    "stat": stat_w.currentText()
+                }
+                v = val_it.text().strip()
+                if atype == "stat_change": act["delta"] = float(v) if v else 0.0
+                else: act["value"] = v
+                actions.append(act)
+                
+        self._rules_data[self._selected_row]["conditions"] = {
+            "operator": "AND" if self._operator_combo.currentIndex() == 0 else "OR",
+            "clauses": clauses
+        }
+        self._rules_data[self._selected_row]["actions"] = actions
+
+    @Slot()
+    def _on_add_cond_row(self) -> None:
+        self._add_cond_table_row({})
+        self.changed.emit()
+
+    @Slot()
+    def _on_rem_cond_row(self) -> None:
+        r = self._cond_table.currentRow()
+        if r >= 0: self._cond_table.removeRow(r)
+        self.changed.emit()
+
+    @Slot()
+    def _on_add_act_row(self) -> None:
+        self._add_act_table_row({})
+        self.changed.emit()
+
+    @Slot()
+    def _on_rem_act_row(self) -> None:
+        r = self._act_table.currentRow()
+        if r >= 0: self._act_table.removeRow(r)
+        self.changed.emit()
 
     @Slot()
     def _on_delete_rule(self) -> None:
-        """Delete the currently selected rule."""
-        row = self._selected_row
-        if row < 0 or row >= len(self._rules_data):
-            return
+        r = self._table.currentRow()
+        if 0 <= r < len(self._rules_data):
+            del self._rules_data[r]
+            self._table.removeRow(r)
+            self.changed.emit()
 
-        # 1. Block signals to prevent premature UI refreshes
-        self._rule_list.blockSignals(True)
+    def _on_item_changed(self, item: QTableWidgetItem) -> None:
+        self.changed.emit()
 
-        # 2. Delete data and visual item
-        del self._rules_data[row]
-        self._rule_list.takeItem(row)
-
-        # 3. Reset local selection BEFORE unblocking
-        self._selected_row = -1
-
-        # 4. Unblock signals
-        self._rule_list.blockSignals(False)
-
-        # 5. Force selection of the new item at the same position (or last)
-        new_row = self._rule_list.currentRow()
-        if new_row >= 0:
-            self._on_rule_selected(new_row)
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key_Delete:
+            self._on_delete_rule()
         else:
-            # Clear form if no rules left
-            self._id_input.clear()
-            self._priority_spin.setValue(0)
-            self._target_input.clear()
-            self._clear_condition_rows()
-            self._clear_action_rows()
-
-    @Slot()
-    def _on_add_condition(self) -> None:
-        self._add_condition_row("", "==", "")
-
-    @Slot()
-    def _on_add_action(self) -> None:
-        self._add_action_row("stat_change", "", "", "")
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
-
-    def _add_condition_row(
-        self, stat: str, comparator: str, value: str
-    ) -> "_ConditionRow":
-        row = _ConditionRow(stat, comparator, value, self._COMPARATORS)
-        row.remove_requested.connect(lambda r=row: self._remove_condition_row(r))
-        self._condition_rows.append(row)
-        self._clauses_container.addWidget(row)
-        return row
-
-    def _remove_condition_row(self, row: "_ConditionRow") -> None:
-        if row in self._condition_rows:
-            self._condition_rows.remove(row)
-            row.deleteLater()
-
-    def _clear_condition_rows(self) -> None:
-        for row in list(self._condition_rows):
-            row.deleteLater()
-        self._condition_rows.clear()
-
-    def _add_action_row(
-        self, action_type: str, target: str, stat: str, value: str
-    ) -> "_ActionRow":
-        row = _ActionRow(action_type, target, stat, value, self._ACTION_TYPES)
-        row.remove_requested.connect(lambda r=row: self._remove_action_row(r))
-        self._action_rows.append(row)
-        self._actions_container.addWidget(row)
-        return row
-
-    def _remove_action_row(self, row: "_ActionRow") -> None:
-        if row in self._action_rows:
-            self._action_rows.remove(row)
-            row.deleteLater()
-
-    def _clear_action_rows(self) -> None:
-        for row in list(self._action_rows):
-            row.deleteLater()
-        self._action_rows.clear()
-
-    def _sync_current_form(self) -> None:
-        """Write form values back to _rules_data for the row being edited.
-
-        Uses _selected_row (the slot whose data is displayed) rather than
-        currentRow(), which has already advanced to the new selection by the
-        time _on_rule_selected fires.
-        """
-        row_idx = self._selected_row
-        if row_idx < 0 or row_idx >= len(self._rules_data):
-            return
-
-        clauses = []
-        for cond_row in self._condition_rows:
-            clause = cond_row.to_dict()
-            if clause["stat"]:
-                clauses.append(clause)
-
-        actions = []
-        for action_row in self._action_rows:
-            action = action_row.to_dict()
-            if action.get("stat") or action.get("type") == "trigger_event":
-                actions.append(action)
-
-        rule_id = self._id_input.text().strip()
-        priority = self._priority_spin.value()
-
-        self._rules_data[row_idx] = {
-            "rule_id": rule_id,
-            "priority": priority,
-            "target_entity": self._target_input.text().strip() or "*",
-            "conditions": {
-                "operator": self._operator_combo.currentText(),
-                "clauses": clauses,
-            },
-            "actions": actions,
-        }
-
-        # Phase 7: Refresh the list item text immediately
-        item = self._rule_list.item(row_idx)
-        if item:
-            item.setText(f"[{priority}] {rule_id or '?'}")
-
-
-# ---------------------------------------------------------------------------
-# Row sub-widgets
-# ---------------------------------------------------------------------------
-
-class _ConditionRow(QWidget):
-    """A single condition clause row: stat / comparator / value / x button."""
-
-    from PySide6.QtCore import Signal
-    remove_requested = Signal()
-
-    def __init__(
-        self,
-        stat: str,
-        comparator: str,
-        value: str,
-        comparators: list[str],
-        parent=None,
-    ) -> None:
-        super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 2, 0, 2)
-
-        self._stat = QLineEdit(stat)
-        self._stat.setPlaceholderText("stat key")
-        self._comparator = QComboBox()
-        self._comparator.addItems(comparators)
-        idx = self._comparator.findText(comparator)
-        self._comparator.setCurrentIndex(max(0, idx))
-        self._value = QLineEdit(value)
-        self._value.setPlaceholderText("value")
-        remove_btn = QPushButton("x")
-        remove_btn.setFixedWidth(28)
-        remove_btn.clicked.connect(self.remove_requested)
-
-        layout.addWidget(self._stat, 2)
-        layout.addWidget(self._comparator, 1)
-        layout.addWidget(self._value, 2)
-        layout.addWidget(remove_btn)
-
-    def to_dict(self) -> dict:
-        """Return clause dict."""
-        return {
-            "stat": self._stat.text().strip(),
-            "comparator": self._comparator.currentText(),
-            "value": self._value.text().strip(),
-        }
-
-
-class _ActionRow(QWidget):
-    """A single action row: type / target / stat / delta-value / x button."""
-
-    from PySide6.QtCore import Signal
-    remove_requested = Signal()
-
-    def __init__(
-        self,
-        action_type: str,
-        target: str,
-        stat: str,
-        value: str,
-        action_types: list[str],
-        parent=None,
-    ) -> None:
-        super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 2, 0, 2)
-
-        self._type_combo = QComboBox()
-        self._type_combo.addItems(action_types)
-        idx = self._type_combo.findText(action_type)
-        self._type_combo.setCurrentIndex(max(0, idx))
-        self._target = QLineEdit(target)
-        self._target.setPlaceholderText("target entity")
-        self._stat = QLineEdit(stat)
-        self._stat.setPlaceholderText("stat key")
-        self._value = QLineEdit(value)
-        self._value.setPlaceholderText("delta / value")
-        remove_btn = QPushButton("x")
-        remove_btn.setFixedWidth(28)
-        remove_btn.clicked.connect(self.remove_requested)
-
-        layout.addWidget(self._type_combo, 2)
-        layout.addWidget(self._target, 2)
-        layout.addWidget(self._stat, 2)
-        layout.addWidget(self._value, 2)
-        layout.addWidget(remove_btn)
-
-    def to_dict(self) -> dict:
-        """Return action dict."""
-        action_type = self._type_combo.currentText()
-        d: dict = {
-            "type": action_type,
-            "target": self._target.text().strip(),
-            "stat": self._stat.text().strip(),
-        }
-        raw_val = self._value.text().strip()
-        if action_type == "stat_change":
-            try:
-                d["delta"] = float(raw_val) if raw_val else 0.0
-            except ValueError:
-                d["delta"] = 0.0
-        else:
-            d["value"] = raw_val
-        return d
+            super().keyPressEvent(event)

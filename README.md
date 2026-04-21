@@ -35,11 +35,12 @@ Traditionally, AI-driven games suffer from "hallucinations" where the AI ignores
 
 ## Prerequisites
 
-| Requirement | Command (Ubuntu/Debian) |
-|---|---|
-| **Python 3.10+** | `sudo apt install python3 python3-pip python3-venv` |
-| **GUI Libraries** | `sudo apt install libxcb-cursor0` |
-| **(Optional) Ollama** | [Install from ollama.com](https://ollama.com) |
+| Platform | Requirement | Command / Action |
+|---|---|---|
+| **Linux** | **Python 3.10+** | `sudo apt install python3 python3-pip python3-venv` |
+| | **GUI Libraries** | `sudo apt install libxcb-cursor0` |
+| **Windows** | **Python 3.10+** | [Download from python.org](https://www.python.org/downloads/) |
+| **Optional** | **Ollama** | [Install from ollama.com](https://ollama.com) |
 
 ---
 
@@ -52,9 +53,15 @@ Traditionally, AI-driven games suffer from "hallucinations" where the AI ignores
    ```
 
 2. **Launch the application:**
+
+   **Linux:**
    ```bash
    bash run.sh
    ```
+
+   **Windows:**
+   Double-click `run.bat` or run it via CMD/PowerShell.
+
    *Note: The first launch will automatically create a virtual environment, install dependencies, and download required embedding models. This may take a few minutes.*
 
 3. **Configure your AI:**

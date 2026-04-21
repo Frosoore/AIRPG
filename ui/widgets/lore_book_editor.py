@@ -2,282 +2,229 @@
 ui/widgets/lore_book_editor.py
 
 Visual editor for the Lore_Book table in the Creator Studio.
-
-Provides a two-panel splitter layout: a list of entries on the left
-and a form for editing a single entry (category, name, content) on the
-right.  Mirrors the paradigm of EntityEditorWidget.
-
-THREADING RULE: No database I/O here.  Data is loaded by DbWorker and
-passed via populate(); collected by _on_save_clicked via collect_data().
+Uses a spreadsheet-like grid for direct lore management and managed categories.
 """
 
 from __future__ import annotations
 
 import uuid
-
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt, Slot, Signal
 from PySide6.QtWidgets import (
-    QFormLayout,
-    QGroupBox,
+    QComboBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
-    QPlainTextEdit,
     QPushButton,
-    QSplitter,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
+    QHeaderView,
+    QAbstractItemView,
+    QMenu,
+    QInputDialog,
+    QMessageBox,
 )
+from core.localization import tr
 
 
 class LoreBookEditorWidget(QWidget):
-    """Visual editor for Lore_Book entries.
+    """Spreadsheet-like lore builder for the Creator Studio."""
 
-    Left panel: scrollable list of entries (shown as "Category - Name").
-    Right panel: editable form for category, name, and content.
-
-    Usage::
-        editor = LoreBookEditorWidget()
-        editor.populate(list_of_entry_dicts)
-        ...
-        entries = editor.collect_data()
-    """
+    populate_requested = Signal(str, object)
+    changed = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._entries: list[dict] = []
-        self._current_index: int = -1
+        self._categories: list[str] = ["General", "Faction", "Location", "Character", "Magic"]
         self._setup_ui()
 
-    # ------------------------------------------------------------------
-    # Setup
-    # ------------------------------------------------------------------
-
     def _setup_ui(self) -> None:
-        """Build the two-panel splitter layout."""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
 
-        splitter = QSplitter(Qt.Horizontal)
+        # Header & Populate
+        top_row = QHBoxLayout()
+        self._header = QLabel(f"<b>{tr('tab_lore')}</b>")
+        top_row.addWidget(self._header)
+        top_row.addStretch()
+        
+        self._populate_btn = QPushButton(f"{tr('populate')} ✨")
+        self._populate_btn.clicked.connect(self._on_populate_clicked)
+        top_row.addWidget(self._populate_btn)
+        layout.addLayout(top_row)
 
-        # ---- Left panel: entry list ----
-        left = QWidget()
-        left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(0, 0, 4, 0)
-        left_layout.addWidget(QLabel("<b>Lore Entries</b>"))
+        # Input Row (Write before Add)
+        input_group = QHBoxLayout()
+        
+        self._in_category = QComboBox()
+        self._in_category.addItems(self._categories)
+        self._in_category.setEditable(False)
+        
+        self._add_cat_btn = QPushButton("+")
+        self._add_cat_btn.setToolTip(tr("add_category_tooltip") if "add_category_tooltip" in tr("ready") else "Add new category")
+        self._add_cat_btn.setFixedWidth(40)
+        self._add_cat_btn.clicked.connect(self._on_add_category)
+        
+        self._in_name = QLineEdit()
+        self._in_name.setPlaceholderText(tr("name"))
+        
+        self._add_btn = QPushButton(f"{tr('add')} +")
+        self._add_btn.setStyleSheet("background-color: #27ae60; font-weight: bold;")
+        self._add_btn.clicked.connect(self._on_add_clicked)
 
-        self._list = QListWidget()
-        self._list.currentRowChanged.connect(self._on_selection_changed)
-        left_layout.addWidget(self._list)
+        input_group.addWidget(self._in_category, 2)
+        input_group.addWidget(self._add_cat_btn, 0)
+        input_group.addWidget(self._in_name, 4)
+        input_group.addWidget(self._add_btn, 1)
+        layout.addLayout(input_group)
 
-        btn_row = QHBoxLayout()
-        add_btn = QPushButton("Add Entry")
-        del_btn = QPushButton("Delete Entry")
-        btn_row.addWidget(add_btn)
-        btn_row.addWidget(del_btn)
-        left_layout.addLayout(btn_row)
+        # Lore Table
+        self._table = QTableWidget(0, 3)
+        self._table.setHorizontalHeaderLabels([
+            tr("type"), tr("name"), tr("description")
+        ])
+        self._table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self._table.setSelectionBehavior(QAbstractItemView.SelectItems)
+        self._table.setAlternatingRowColors(True)
+        self._table.itemChanged.connect(self._on_item_changed)
+        layout.addWidget(self._table)
 
-        add_btn.clicked.connect(self._on_add_clicked)
-        del_btn.clicked.connect(self._on_delete_clicked)
+        # Bottom Actions
+        bottom_row = QHBoxLayout()
+        self._del_btn = QPushButton(tr("delete"))
+        self._del_btn.setToolTip(f"{tr('delete')} (Del)")
+        bottom_row.addWidget(self._del_btn)
+        bottom_row.addStretch()
+        layout.addLayout(bottom_row)
 
-        # ---- Right panel: entry form ----
-        right = QGroupBox("Entry Details")
-        form = QFormLayout(right)
-
-        self._category_edit = QLineEdit()
-        self._category_edit.setPlaceholderText("e.g. Faction, Magic System, Location")
-        self._name_edit = QLineEdit()
-        self._name_edit.setPlaceholderText("e.g. The Red Guard")
-        self._content_edit = QPlainTextEdit()
-        self._content_edit.setPlaceholderText(
-            "Describe this lore entry in detail..."
-        )
-        self._content_edit.setMinimumHeight(180)
-
-        form.addRow("Category:", self._category_edit)
-        form.addRow("Name:", self._name_edit)
-        form.addRow("Content:", self._content_edit)
-
-        # Sync form changes back to in-memory list
-        self._category_edit.textChanged.connect(self._on_form_changed)
-        self._name_edit.textChanged.connect(self._on_form_changed)
-        self._content_edit.textChanged.connect(self._on_form_changed)
-
-        splitter.addWidget(left)
-        splitter.addWidget(right)
-        splitter.setSizes([200, 400])
-        layout.addWidget(splitter)
-
-        self._set_form_enabled(False)
+        self._del_btn.clicked.connect(self._on_delete_clicked)
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
+    def retranslate_ui(self) -> None:
+        self._header.setText(f"<b>{tr('tab_lore')}</b>")
+        self._add_btn.setText(f"{tr('add')} +")
+        self._del_btn.setText(tr("delete"))
+        self._populate_btn.setText(f"{tr('populate')} ✨")
+        self._in_name.setPlaceholderText(tr("name"))
+        self._add_cat_btn.setText("+")
+        self._add_cat_btn.setToolTip(tr("add_category_tooltip") if "add_category_tooltip" in tr("ready") else "Add new category")
+        self._table.setHorizontalHeaderLabels([tr("type"), tr("name"), tr("description")])
+
     def populate(self, entries: list[dict]) -> None:
-        """Populate the editor with a list of Lore_Book entry dicts.
-
-        Each dict must have keys: entry_id, category, name, content.
-
-        Args:
-            entries: List of entry dicts loaded from the database.
-        """
+        """Load lore data into the table."""
+        self._table.blockSignals(True)
+        self._table.setRowCount(0)
         self._entries = [dict(e) for e in entries]
-        self._current_index = -1
-        self._refresh_list()
-        self._set_form_enabled(False)
-        self._clear_form()
+        
+        # Collect unique categories
+        for e in self._entries:
+            cat = e.get("category", "General")
+            if cat and cat not in self._categories:
+                self._categories.append(cat)
+        self._refresh_category_combos()
+
+        for ent in self._entries:
+            self._add_lore_row(ent)
+        
+        self._table.blockSignals(False)
 
     def collect_data(self) -> list[dict]:
-        """Return the current in-memory list of entry dicts.
-
-        Flushes any pending form edits before returning.
-
-        Returns:
-            List of entry dicts with keys: entry_id, category, name, content.
-        """
-        # Phase 7: Absolute Persistence Protocol - Sync and refresh UI label
-        self._flush_form()
-        for entry in self._entries:
-            if not entry.get("entry_id"):
-                entry["entry_id"] = uuid.uuid4().hex
-        return [dict(e) for e in self._entries]
+        """Gather data from table back into a list of dicts."""
+        data = []
+        for r in range(self._table.rowCount()):
+            cat_w = self._table.cellWidget(r, 0)
+            category = cat_w.currentText() if isinstance(cat_w, QComboBox) else "General"
+            
+            name = self._table.item(r, 1).text().strip()
+            content = self._table.item(r, 2).text().strip()
+            
+            eid = self._table.item(r, 1).data(Qt.UserRole) or uuid.uuid4().hex
+            
+            data.append({
+                "entry_id": eid,
+                "category": category,
+                "name": name,
+                "content": content
+            })
+        return data
 
     # ------------------------------------------------------------------
-    # Slots
+    # Implementation
     # ------------------------------------------------------------------
+
+    def _add_lore_row(self, ent: dict) -> None:
+        row = self._table.rowCount()
+        self._table.insertRow(row)
+        
+        cat_combo = QComboBox()
+        cat_combo.addItems(self._categories)
+        cat_combo.setCurrentText(ent.get("category", "General"))
+        self._table.setCellWidget(row, 0, cat_combo)
+        cat_combo.currentTextChanged.connect(lambda _: self.changed.emit())
+        
+        it_name = QTableWidgetItem(ent.get("name", ""))
+        it_name.setData(Qt.UserRole, ent.get("entry_id", uuid.uuid4().hex))
+        
+        it_desc = QTableWidgetItem(ent.get("content", ""))
+        
+        self._table.setItem(row, 1, it_name)
+        self._table.setItem(row, 2, it_desc)
 
     @Slot()
     def _on_add_clicked(self) -> None:
-        """Add a new blank entry and select it."""
-        entry = {
-            "entry_id": str(uuid.uuid4()),
-            "category": "",
-            "name": "New Entry",
-            "content": "",
+        cat = self._in_category.currentText()
+        name = self._in_name.text().strip() or "(unnamed)"
+        
+        new_ent = {
+            "entry_id": uuid.uuid4().hex,
+            "category": cat,
+            "name": name,
+            "content": ""
         }
-        self._entries.append(entry)
-        self._refresh_list()
-        self._list.setCurrentRow(len(self._entries) - 1)
+        self._add_lore_row(new_ent)
+        self._in_name.clear()
+        self._table.setCurrentCell(self._table.rowCount()-1, 2)
+        self.changed.emit()
+
+    @Slot()
+    def _on_add_category(self) -> None:
+        text, ok = QInputDialog.getText(self, "New Category", "Category Name:")
+        if ok and text.strip():
+            cat = text.strip()
+            if cat not in self._categories:
+                self._categories.append(cat)
+                self._refresh_category_combos()
+                self._in_category.setCurrentText(cat)
+
+    def _refresh_category_combos(self) -> None:
+        self._in_category.clear()
+        self._in_category.addItems(self._categories)
+        # We don't refresh table combos as it's destructive, but new rows will have it
 
     @Slot()
     def _on_delete_clicked(self) -> None:
-        """Delete the currently selected entry."""
-        row = self._current_index
-        if row < 0 or row >= len(self._entries):
-            return
+        indices = self._table.selectionModel().selectedRows()
+        rows = sorted([i.row() for i in indices], reverse=True) if indices else [self._table.currentRow()]
+        for r in rows:
+            if 0 <= r < self._table.rowCount():
+                self._table.removeRow(r)
+        self.changed.emit()
 
-        # 1. Block signals for the list
-        self._list.blockSignals(True)
+    def _on_item_changed(self, item: QTableWidgetItem) -> None:
+        self.changed.emit()
 
-        # 2. Delete data
-        self._entries.pop(row)
-        self._list.takeItem(row)
+    def _on_populate_clicked(self) -> None:
+        text, ok = QInputDialog.getMultiLineText(self, "Populate Lore ✨", "Describe the lore entries to generate (History, Magic, Locations...):")
+        if ok and text.strip():
+            self.populate_requested.emit("custom", text.strip())
 
-        # 3. Reset local selection BEFORE unblocking
-        self._current_index = -1
-
-        # 4. Unblock signals
-        self._list.blockSignals(False)
-
-        # 5. Force selection of the new item at the same position (or last)
-        new_row = self._list.currentRow()
-        if new_row >= 0:
-            self._on_selection_changed(new_row)
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key_Delete:
+            self._on_delete_clicked()
         else:
-            # Clear form if no entries left
-            self._set_form_enabled(False)
-            self._clear_form()
-
-    @Slot(int)
-    def _on_selection_changed(self, row: int) -> None:
-        """Load the selected entry into the form."""
-        self._flush_form()
-        self._current_index = row
-        if 0 <= row < len(self._entries):
-            entry = self._entries[row]
-            self._category_edit.blockSignals(True)
-            self._name_edit.blockSignals(True)
-            self._content_edit.blockSignals(True)
-            self._category_edit.setText(entry.get("category", ""))
-            self._name_edit.setText(entry.get("name", ""))
-            self._content_edit.setPlainText(entry.get("content", ""))
-            self._category_edit.blockSignals(False)
-            self._name_edit.blockSignals(False)
-            self._content_edit.blockSignals(False)
-            self._set_form_enabled(True)
-        else:
-            self._set_form_enabled(False)
-            self._clear_form()
-
-    @Slot()
-    def _on_form_changed(self) -> None:
-        """Sync form values to the in-memory entry and refresh the list label."""
-        if 0 <= self._current_index < len(self._entries):
-            self._entries[self._current_index]["category"] = (
-                self._category_edit.text().strip()
-            )
-            self._entries[self._current_index]["name"] = (
-                self._name_edit.text().strip()
-            )
-            self._entries[self._current_index]["content"] = (
-                self._content_edit.toPlainText()
-            )
-            # Refresh just the label for the current row
-            label = self._make_label(self._entries[self._current_index])
-            if self._list.item(self._current_index):
-                self._list.item(self._current_index).setText(label)
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
-
-    def _refresh_list(self) -> None:
-        """Rebuild the QListWidget from `_entries`."""
-        self._list.blockSignals(True)
-        self._list.clear()
-        for entry in self._entries:
-            self._list.addItem(QListWidgetItem(self._make_label(entry)))
-        self._list.blockSignals(False)
-
-    @staticmethod
-    def _make_label(entry: dict) -> str:
-        """Return a human-readable label for a list row."""
-        cat = entry.get("category", "").strip() or "Uncategorised"
-        name = entry.get("name", "").strip() or "(unnamed)"
-        return f"{cat} - {name}"
-
-    def _flush_form(self) -> None:
-        """Write current form values back to the in-memory entry."""
-        if 0 <= self._current_index < len(self._entries):
-            category = self._category_edit.text().strip()
-            name = self._name_edit.text().strip()
-            content = self._content_edit.toPlainText()
-
-            self._entries[self._current_index]["category"] = category
-            self._entries[self._current_index]["name"] = name
-            self._entries[self._current_index]["content"] = content
-
-            # Phase 7: Refresh the list item text immediately
-            label = self._make_label(self._entries[self._current_index])
-            item = self._list.item(self._current_index)
-            if item:
-                item.setText(label)
-
-    def _set_form_enabled(self, enabled: bool) -> None:
-        """Enable or disable the right-panel form fields."""
-        self._category_edit.setEnabled(enabled)
-        self._name_edit.setEnabled(enabled)
-        self._content_edit.setEnabled(enabled)
-
-    def _clear_form(self) -> None:
-        """Clear all form fields without triggering sync signals."""
-        for widget in (self._category_edit, self._name_edit):
-            widget.blockSignals(True)
-            widget.clear()
-            widget.blockSignals(False)
-        self._content_edit.blockSignals(True)
-        self._content_edit.clear()
-        self._content_edit.blockSignals(False)
+            super().keyPressEvent(event)

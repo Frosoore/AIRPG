@@ -6,6 +6,7 @@ from PySide6.QtGui import QTextCursor, QTextCharFormat, QTextBlockFormat, QColor
 from PySide6.QtCore import Signal, QUrl, Qt
 
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
+from core.localization import tr
 
 class _RichTextBrowser(QTextBrowser):
     def __init__(self, parent=None):
@@ -127,10 +128,8 @@ class ChatDisplayWidget(QWidget):
         input_row = QHBoxLayout()
         self._input_box = _MultiLineInput()
         self._input_box.setFixedHeight(60)
-        self._input_box.setPlaceholderText(
-            "Enter your action... (Enter to send, Shift+Enter for newline)"
-        )
-        self._send_button = QPushButton("Send")
+        self._input_box.setPlaceholderText(tr("type_message"))
+        self._send_button = QPushButton(tr("send"))
         self._send_button.setFixedWidth(90)
         self._send_button.setFixedHeight(60)
         input_row.addWidget(self._input_box)
@@ -143,6 +142,10 @@ class ChatDisplayWidget(QWidget):
         self._reset_states()
         self._in_json_fence = False
         self._token_buf = ""
+
+    def retranslate_ui(self):
+        self._input_box.setPlaceholderText(tr("type_message"))
+        self._send_button.setText(tr("send"))
 
     def set_send_enabled(self, enabled: bool):
         self._send_button.setEnabled(enabled)
@@ -307,6 +310,9 @@ class ChatDisplayWidget(QWidget):
             cursor.insertText(char, fmt)
 
     def _insert_instant_parsed_text(self, text: str):
+        # Fix: Unescape literal \r\n and other common JSON escapes that might be in the source
+        text = text.replace("\\r\\n", "\n").replace("\\n", "\n").replace('\\"', '"')
+        
         cursor = self._narrative_display.textCursor()
         cursor.movePosition(QTextCursor.End)
 
@@ -353,7 +359,8 @@ class ChatDisplayWidget(QWidget):
                     nav_parts.append(f"<a href='variant:{turn_id}:{i}' style='color: #4FC1FF; text-decoration: none;'>[{i+1}]</a>")
         
         if is_latest:
-            nav_parts.append(f"<a href='regenerate:{turn_id}' style='color: #FFB000; text-decoration: none;'>[⟳ Regenerate]</a>")
+            reg_text = tr("regenerate") if "regenerate" in tr("ready") else "Regenerate"
+            nav_parts.append(f"<a href='regenerate:{turn_id}' style='color: #FFB000; text-decoration: none;'>[⟳ {reg_text}]</a>")
             
         html_nav = "&nbsp;&nbsp;".join(nav_parts)
         
@@ -392,34 +399,29 @@ class ChatDisplayWidget(QWidget):
                 turn_id = event.get('turn_id', 0)
 
                 if evt_type == 'user_input':
-                    # payload might be a dict depending on DB evolution, handle gracefully
                     text_payload = payload.get("text", "") if isinstance(payload, dict) else str(payload)
                     self.append_user_message(text_payload)
                 elif evt_type == 'narrative_text':
                     active_idx = 0
                     total_vars = 1
-                    text_to_print = payload if isinstance(payload, str) else str(payload)
+                    text_to_print = ""
 
                     if isinstance(payload, dict):
                          if 'active' in payload and 'variants' in payload:
+                            # It's a multiverse payload
                             active_idx = payload['active']
                             variants = payload['variants']
                             total_vars = len(variants)
                             if 0 <= active_idx < total_vars:
                                 text_to_print = variants[active_idx]
                          else:
-                            text_to_print = payload.get("text", "")
+                            # It's a simple dict (maybe from older schema)
+                            text_to_print = payload.get("text", str(payload))
                     elif isinstance(payload, str):
-                        try:
-                            data = json.loads(payload)
-                            if isinstance(data, dict) and 'active' in data and 'variants' in data:
-                                active_idx = data['active']
-                                variants = data['variants']
-                                total_vars = len(variants)
-                                if 0 <= active_idx < total_vars:
-                                    text_to_print = variants[active_idx]
-                        except (json.JSONDecodeError, TypeError):
-                            pass
+                        # Simple text
+                        text_to_print = payload
+                    else:
+                        text_to_print = str(payload)
 
                     self.append_assistant_separator()
                     self._insert_instant_parsed_text(text_to_print)

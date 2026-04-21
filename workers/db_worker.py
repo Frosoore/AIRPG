@@ -52,6 +52,7 @@ class DbWorker(QObject):
     library_loaded = Signal(list)
     saves_loaded = Signal(list)
     history_loaded = Signal(list, int)
+    full_universe_loaded = Signal(dict)
     modifiers_ticked = Signal(list)
     variant_updated = Signal(str)
     integrity_validated = Signal(bool, dict)
@@ -69,7 +70,6 @@ class DbWorker(QObject):
         """Connect task signals to worker signals and start it."""
         task.signals.status.connect(self.status_update.emit)
         task.signals.error.connect(self.error_occurred.emit)
-        task.signals.finished.connect(self.save_complete.emit)
         
         # Prevent GC of the task object
         self._active_tasks.add(task)
@@ -131,9 +131,10 @@ class DbWorker(QObject):
         task.signals.result.connect(lambda res: self.history_loaded.emit(res[0], res[1]))
         self._setup_task(task)
 
-    def update_narrative_variant(self, save_id: str, turn_id: int, index: int) -> None:
+    def switch_narrative_variant(self, save_id: str, turn_id: int, index: int) -> None:
         task = UpdateVariantTask(self._db_path, save_id, turn_id, index)
         task.signals.result.connect(self.variant_updated.emit)
+        task.signals.result.connect(lambda _: self.save_complete.emit())
         self._setup_task(task)
 
     def delete_save(self, save_id: str) -> None:
@@ -144,6 +145,7 @@ class DbWorker(QObject):
     def tick_modifiers(self, save_id: str, elapsed_minutes: int) -> None:
         task = TickModifiersTask(self._db_path, save_id, elapsed_minutes)
         task.signals.result.connect(self.modifiers_ticked.emit)
+        task.signals.result.connect(lambda _: self.save_complete.emit())
         self._setup_task(task)
 
     def create_player_entity(self, name: str, description: str = "") -> None:
@@ -161,10 +163,17 @@ class DbWorker(QObject):
         task = SnapshotTask(self._db_path, save_id, turn_id)
         self._setup_task(task)
 
-    def populate_entities(self) -> None:
+    def populate_entities(self, mode: str = "auto", custom_text: str | None = None) -> None:
         """AI-driven entity generation (asynchronous)."""
-        task = PopulateEntitiesTask(self._db_path)
+        task = PopulateEntitiesTask(self._db_path, mode, custom_text)
         # We need to reload entities once finished
+        task.signals.result.connect(lambda _: self.load_entities_and_rules())
+        self._setup_task(task)
+
+    def populate_lore(self, mode: str = "auto", custom_text: str | None = None) -> None:
+        """AI-driven lore book generation (asynchronous)."""
+        from workers.db_tasks import PopulateLoreTask
+        task = PopulateLoreTask(self._db_path, mode, custom_text)
         task.signals.result.connect(lambda _: self.load_entities_and_rules())
         self._setup_task(task)
 
@@ -397,6 +406,14 @@ class DbWorker(QObject):
             self.universe_meta_loaded.emit(res[3]),
             self.stat_definitions_loaded.emit(res[4]),
             self.scheduled_events_loaded.emit(res[5]),
+            self.full_universe_loaded.emit({
+                "entities": res[0],
+                "rules": res[1],
+                "lore_book": res[2],
+                "meta": res[3],
+                "stat_definitions": res[4],
+                "scheduled_events": res[5]
+            }),
             self.history_loaded.emit(res[6], res[7]) if save_id else None
         ))
         self._setup_task(task)

@@ -2,7 +2,7 @@
 ui/widgets/stat_definition_editor.py
 
 Visual editor for Stat Definitions in the Creator Studio.
-Allows defining stats as 'numeric' or 'categorical' with specific parameters.
+Uses a spreadsheet-like grid for direct editing and keyboard navigation.
 """
 
 from __future__ import annotations
@@ -13,18 +13,19 @@ import uuid
 from PySide6.QtCore import Qt, Slot, Signal
 from PySide6.QtWidgets import (
     QComboBox,
-    QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
     QPushButton,
-    QSplitter,
     QVBoxLayout,
     QWidget,
-    QStackedWidget,
-    QDoubleSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QHeaderView,
+    QAbstractItemView,
+    QMessageBox,
 )
+from core.localization import tr
 
 try:
     from database.presets import STAT_PRESETS
@@ -33,188 +34,219 @@ except ImportError:
 
 
 class StatDefinitionEditorWidget(QWidget):
-    """Visual builder for the Creator Studio Stats tab.
+    """Spreadsheet-like builder for the Creator Studio Stats tab."""
 
-    Users can manage the list of stats and define their types and parameters.
-    """
+    changed = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self._stats_data: list[dict] = []
-        self._selected_row: int = -1
         self._setup_ui()
 
     def _setup_ui(self) -> None:
-        layout = QHBoxLayout(self)
-        splitter = QSplitter(Qt.Horizontal)
+        layout = QVBoxLayout(self)
 
-        # Left - Stat list
-        left = QWidget()
-        left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.addWidget(QLabel("<b>Stat Definitions</b>"))
+        # Header & Presets
+        top_row = QHBoxLayout()
+        self._header = QLabel(f"<b>{tr('stats')}</b>")
+        top_row.addWidget(self._header)
+        top_row.addStretch()
 
-        self._stat_list = QListWidget()
-        self._stat_list.currentRowChanged.connect(self._on_stat_selected)
-        left_layout.addWidget(self._stat_list)
-
-        btn_row = QHBoxLayout()
-        add_btn = QPushButton("Add")
-        del_btn = QPushButton("Delete")
-        btn_row.addWidget(add_btn)
-        btn_row.addWidget(del_btn)
-        left_layout.addLayout(btn_row)
-
-        add_btn.clicked.connect(self._on_add_stat)
-        del_btn.clicked.connect(self._on_delete_stat)
-
-        # Stat Presets UI
         self._preset_combo = QComboBox()
         self._preset_combo.addItems(list(STAT_PRESETS.keys()))
-        self._preset_btn = QPushButton("Apply Preset")
-        
-        preset_layout = QHBoxLayout()
-        preset_layout.addWidget(self._preset_combo)
-        preset_layout.addWidget(self._preset_btn)
-        left_layout.addLayout(preset_layout)
-
+        self._preset_btn = QPushButton(tr("apply_preset"))
+        self._preset_btn.setToolTip(tr("apply_preset_tooltip") if "apply_preset_tooltip" in tr("ready") else "Add a set of predefined stats")
+        top_row.addWidget(self._preset_combo)
+        top_row.addWidget(self._preset_btn)
         self._preset_btn.clicked.connect(self._on_apply_preset)
+        layout.addLayout(top_row)
 
-        # Right - Stat form
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
-        
-        basic_form = QFormLayout()
+        # Input Row (Write before Add)
+        input_group = QHBoxLayout()
         self._id_input = QLineEdit()
+        self._id_input.setPlaceholderText(f"{tr('stat')} ID")
         self._name_input = QLineEdit()
-        self._desc_input = QLineEdit()
+        self._name_input.setPlaceholderText(tr("name"))
         self._type_combo = QComboBox()
-        self._type_combo.addItems(["numeric", "categorical"])
-        self._type_combo.currentIndexChanged.connect(self._on_type_changed)
-
-        basic_form.addRow("Stat ID:", self._id_input)
-        basic_form.addRow("Name:", self._name_input)
-        basic_form.addRow("Description:", self._desc_input)
-        basic_form.addRow("Value Type:", self._type_combo)
-        right_layout.addLayout(basic_form)
-
-        # Parameters Stack
-        self._params_stack = QStackedWidget()
+        self._type_combo.addItems([tr("numeric"), tr("categorical")])
         
-        # Numeric Params
-        self._numeric_widget = QWidget()
-        num_layout = QFormLayout(self._numeric_widget)
-        self._min_spin = QDoubleSpinBox()
-        self._min_spin.setRange(-999999, 999999)
-        self._max_spin = QDoubleSpinBox()
-        self._max_spin.setRange(-999999, 999999)
-        self._max_spin.setValue(100)
-        num_layout.addRow("Min Value:", self._min_spin)
-        num_layout.addRow("Max Value:", self._max_spin)
+        self._add_btn = QPushButton(f"{tr('add')} +")
+        self._add_btn.setStyleSheet("background-color: #27ae60; font-weight: bold;")
         
-        # Categorical Params
-        self._categorical_widget = QWidget()
-        cat_layout = QFormLayout(self._categorical_widget)
-        self._options_input = QLineEdit()
-        self._options_input.setPlaceholderText("Choice 1, Choice 2, ...")
-        cat_layout.addRow("Options (CSV):", self._options_input)
+        input_group.addWidget(self._id_input, 2)
+        input_group.addWidget(self._name_input, 3)
+        input_group.addWidget(self._type_combo, 2)
+        input_group.addWidget(self._add_btn, 1)
+        layout.addLayout(input_group)
 
-        self._params_stack.addWidget(self._numeric_widget)
-        self._params_stack.addWidget(self._categorical_widget)
-        
-        right_layout.addWidget(QLabel("<b>Type Parameters</b>"))
-        right_layout.addWidget(self._params_stack)
-        right_layout.addStretch()
+        self._add_btn.clicked.connect(self._on_add_clicked)
 
-        splitter.addWidget(left)
-        splitter.addWidget(right)
-        splitter.setSizes([200, 400])
-        layout.addWidget(splitter)
+        # Main Table
+        self._table = QTableWidget(0, 5)
+        self._table.setHorizontalHeaderLabels([
+            tr("id"), tr("name"), tr("type"), tr("description"), tr("options")
+        ])
+        self._table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self._table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self._table.setSelectionBehavior(QAbstractItemView.SelectItems)
+        self._table.setAlternatingRowColors(True)
+        self._table.itemChanged.connect(self._on_item_changed)
+        layout.addWidget(self._table)
+
+        # Bottom Actions
+        bottom_row = QHBoxLayout()
+        self._del_btn = QPushButton(tr("delete"))
+        self._del_btn.setToolTip(f"{tr('delete')} (Del)")
+        bottom_row.addWidget(self._del_btn)
+        bottom_row.addStretch()
+        layout.addLayout(bottom_row)
+
+        self._del_btn.clicked.connect(self._on_delete_stat)
 
     @Slot(list)
     def populate(self, stats: list[dict]) -> None:
-        """Populate the stat list."""
-        self._selected_row = -1
-        self._stats_data = stats
-        self._stat_list.clear()
-        for stat in stats:
-            self._stat_list.addItem(f"{stat.get('name', '?')} ({stat.get('stat_id', '?')})")
-        if stats:
-            self._stat_list.setCurrentRow(0)
+        """Populate the table from a list of stat definitions."""
+        self._table.blockSignals(True)
+        self._table.setRowCount(0)
+        for s in stats:
+            self._add_row(s)
+        self._table.blockSignals(False)
 
     def collect_data(self) -> list[dict]:
-        """Return the current form state as a list of stat definitions."""
-        self._sync_current_form()
-        return list(self._stats_data)
+        """Return the current table state as a list of stat definitions."""
+        stats = []
+        for row in range(self._table.rowCount()):
+            sid = self._table.item(row, 0).text().strip()
+            name = self._table.item(row, 1).text().strip()
+            vtype_display = self._table.item(row, 2).text().strip()
+            desc = self._table.item(row, 3).text().strip()
+            params_raw = self._table.item(row, 4).text().strip()
 
-    def _on_stat_selected(self, row: int) -> None:
-        self._sync_current_form()
-        self._selected_row = row
+            vtype = "numeric" if vtype_display == tr("numeric") else "categorical"
+            
+            params = {}
+            if vtype == "numeric":
+                # Try to parse "min:X, max:Y"
+                try:
+                    p_parts = [p.split(":") for p in params_raw.split(",") if ":" in p]
+                    p_dict = {k.strip().lower(): v.strip() for k, v in p_parts}
+                    params["min"] = float(p_dict.get("min", 0))
+                    params["max"] = float(p_dict.get("max", 100))
+                except (ValueError, TypeError):
+                    params = {"min": 0, "max": 100}
+            else:
+                options = [o.strip() for o in params_raw.split(",") if o.strip()]
+                params["options"] = options
 
-        if row < 0 or row >= len(self._stats_data):
-            return
-        stat = self._stats_data[row]
+            stats.append({
+                "stat_id": sid,
+                "name": name,
+                "description": desc,
+                "value_type": vtype,
+                "parameters": params
+            })
+        return stats
 
-        self._id_input.setText(stat.get("stat_id", ""))
-        self._name_input.setText(stat.get("name", ""))
-        self._desc_input.setText(stat.get("description", ""))
+    def retranslate_ui(self) -> None:
+        """Refresh all UI text for the current language."""
+        self._header.setText(f"<b>{tr('stats')}</b>")
+        self._add_btn.setText(f"{tr('add')} +")
+        self._del_btn.setText(tr("delete"))
+        self._preset_btn.setText(tr("apply_preset"))
+        
+        self._id_input.setPlaceholderText(f"{tr('stat')} ID")
+        self._name_input.setPlaceholderText(tr("name"))
+        
+        # Update type combo
+        self._type_combo.blockSignals(True)
+        curr = self._type_combo.currentIndex()
+        self._type_combo.clear()
+        self._type_combo.addItems([tr("numeric"), tr("categorical")])
+        self._type_combo.setCurrentIndex(curr)
+        self._type_combo.blockSignals(False)
+
+        self._table.setHorizontalHeaderLabels([
+            tr("id"), tr("name"), tr("type"), tr("description"), tr("options")
+        ])
+
+    def _add_row(self, stat: dict | None = None) -> None:
+        row = self._table.rowCount()
+        self._table.insertRow(row)
+
+        if not stat:
+            stat = {
+                "stat_id": f"stat_{uuid.uuid4().hex[:6]}",
+                "name": tr("new_stat"),
+                "value_type": "numeric",
+                "description": "",
+                "parameters": {"min": 0, "max": 100}
+            }
+
+        it_id = QTableWidgetItem(stat.get("stat_id", ""))
+        it_name = QTableWidgetItem(stat.get("name", ""))
         
         vtype = stat.get("value_type", "numeric")
-        idx = self._type_combo.findText(vtype)
-        self._type_combo.setCurrentIndex(max(0, idx))
-        self._on_type_changed(self._type_combo.currentIndex())
-
+        it_type = QTableWidgetItem(tr(vtype))
+        it_type.setFlags(it_type.flags() & ~Qt.ItemIsEditable) # Type fixed on add for simplicity, or we can make it a combo
+        
+        it_desc = QTableWidgetItem(stat.get("description", ""))
+        
         params = stat.get("parameters", {})
         if vtype == "numeric":
-            self._min_spin.setValue(float(params.get("min", 0)))
-            self._max_spin.setValue(float(params.get("max", 100)))
+            from core.localization import fmt_num
+            p_min = fmt_num(params.get('min', 0))
+            p_max = fmt_num(params.get('max', 100))
+            params_str = f"min:{p_min}, max:{p_max}"
         else:
-            options = params.get("options", [])
-            self._options_input.setText(", ".join(options))
+            params_str = ", ".join(params.get("options", []))
+        it_params = QTableWidgetItem(params_str)
+
+        self._table.setItem(row, 0, it_id)
+        self._table.setItem(row, 1, it_name)
+        self._table.setItem(row, 2, it_type)
+        self._table.setItem(row, 3, it_desc)
+        self._table.setItem(row, 4, it_params)
 
     @Slot()
-    def _on_add_stat(self) -> None:
-        self._sync_current_form()
+    def _on_add_clicked(self) -> None:
+        """Add new stat using data from the input row."""
+        sid = self._id_input.text().strip()
+        name = self._name_input.text().strip()
+        vtype = "numeric" if self._type_combo.currentIndex() == 0 else "categorical"
+
+        if not sid:
+            sid = f"stat_{uuid.uuid4().hex[:6]}"
+        if not name:
+            name = tr("new_stat")
+
         new_stat = {
-            "stat_id": f"stat_{uuid.uuid4().hex[:6]}",
-            "name": "New Stat",
+            "stat_id": sid,
+            "name": name,
+            "value_type": vtype,
             "description": "",
-            "value_type": "numeric",
-            "parameters": {"min": 0, "max": 100}
+            "parameters": {"min": 0, "max": 100} if vtype == "numeric" else {"options": []}
         }
-        self._stats_data.append(new_stat)
-        self._stat_list.addItem(f"{new_stat['name']} ({new_stat['stat_id']})")
-        self._stat_list.setCurrentRow(len(self._stats_data) - 1)
+        self._add_row(new_stat)
+        self._id_input.clear()
+        self._name_input.clear()
+        self.changed.emit()
 
     @Slot()
     def _on_delete_stat(self) -> None:
-        row = self._selected_row
-        if row < 0 or row >= len(self._stats_data):
+        """Remove the selected row(s)."""
+        indices = self._table.selectionModel().selectedRows()
+        if not indices:
+            # Fallback to current item's row if no full rows selected
+            curr = self._table.currentRow()
+            if curr >= 0:
+                self._table.removeRow(curr)
+                self.changed.emit()
             return
-            
-        # 1. Block signals to prevent the list from triggering premature events
-        self._stat_list.blockSignals(True)
-        
-        # 2. Remove the data and the visual item
-        del self._stats_data[row]
-        self._stat_list.takeItem(row)
-        
-        # 3. Reset local selection BEFORE unblocking,
-        # to prevent _sync_current_form from overwriting the new row with old UI data
-        self._selected_row = -1 
-        
-        # 4. Unblock signals
-        self._stat_list.blockSignals(False)
-        
-        # 5. Force selection of the new element (if list is not empty)
-        new_row = self._stat_list.currentRow()
-        if new_row >= 0:
-            self._on_stat_selected(new_row)
-        else:
-            # Clear form if everything was deleted
-            self._id_input.clear()
-            self._name_input.clear()
-            self._desc_input.clear()
+
+        # Sort indices in reverse to delete from bottom up
+        rows = sorted([i.row() for i in indices], reverse=True)
+        for r in rows:
+            self._table.removeRow(r)
+        self.changed.emit()
 
     @Slot()
     def _on_apply_preset(self) -> None:
@@ -223,7 +255,6 @@ class StatDefinitionEditorWidget(QWidget):
         if preset_name not in STAT_PRESETS:
             return
 
-        self._sync_current_form()
         for stat_template in STAT_PRESETS[preset_name]:
             new_stat = {
                 "stat_id": uuid.uuid4().hex[:6],
@@ -232,40 +263,15 @@ class StatDefinitionEditorWidget(QWidget):
                 "value_type": stat_template["value_type"],
                 "parameters": stat_template.get("parameters", {})
             }
-            self._stats_data.append(new_stat)
-            self._stat_list.addItem(f"{new_stat['name']} ({new_stat['stat_id']})")
-        
-        if STAT_PRESETS[preset_name]:
-            self._stat_list.setCurrentRow(len(self._stats_data) - 1)
+            self._add_row(new_stat)
+        self.changed.emit()
 
-    @Slot(int)
-    def _on_type_changed(self, index: int) -> None:
-        self._params_stack.setCurrentIndex(index)
+    def _on_item_changed(self, item: QTableWidgetItem) -> None:
+        self.changed.emit()
 
-    def _sync_current_form(self) -> None:
-        row = self._selected_row
-        if row < 0 or row >= len(self._stats_data):
-            return
-
-        vtype = self._type_combo.currentText()
-        params = {}
-        if vtype == "numeric":
-            params = {"min": self._min_spin.value(), "max": self._max_spin.value()}
+    def keyPressEvent(self, event) -> None:
+        """Handle Delete key to remove rows."""
+        if event.key() == Qt.Key_Delete:
+            self._on_delete_stat()
         else:
-            options = [o.strip() for o in self._options_input.text().split(",") if o.strip()]
-            params = {"options": options}
-
-        stat_id = self._id_input.text().strip()
-        name = self._name_input.text().strip()
-
-        self._stats_data[row] = {
-            "stat_id": stat_id,
-            "name": name,
-            "description": self._desc_input.text().strip(),
-            "value_type": vtype,
-            "parameters": params
-        }
-
-        item = self._stat_list.item(row)
-        if item:
-            item.setText(f"{name or '?'} ({stat_id or '?'})")
+            super().keyPressEvent(event)

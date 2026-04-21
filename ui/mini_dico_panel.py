@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from workers.mini_dico_worker import MiniDicoWorker
+from core.localization import tr
 
 
 class MiniDicoPanel(QWidget):
@@ -59,23 +60,30 @@ class MiniDicoPanel(QWidget):
         layout.setSpacing(6)
         layout.setContentsMargins(4, 4, 4, 4)
 
-        header = QLabel("<b>Lore Reference</b>")
-        layout.addWidget(header)
+        self._header = QLabel(f"<b>{tr('tab_lore')}</b>")
+        layout.addWidget(self._header)
 
         self._answer_display = QTextEdit()
         self._answer_display.setReadOnly(True)
         self._answer_display.setAcceptRichText(False)
-        self._answer_display.setPlaceholderText("Lore answers appear here...")
+        self._answer_display.setPlaceholderText(
+            tr("ready") # Fallback placeholder
+        )
         self._answer_display.setSizePolicy(
             QSizePolicy.Expanding, QSizePolicy.Expanding
         )
         layout.addWidget(self._answer_display)
 
         self._question_input = QLineEdit()
-        self._question_input.setPlaceholderText("Ask about the lore...")
+        self._question_input.setPlaceholderText(tr("lore_search"))
         layout.addWidget(self._question_input)
 
-        self._ask_button = QPushButton("Ask")
+        self._ask_button = QPushButton(tr("send")) # Reuse "Send" or add "Ask"
+        if "ask" in tr("ready"):
+             self._ask_button.setText(tr("ask"))
+        else:
+             self._ask_button.setText("Ask")
+             
         layout.addWidget(self._ask_button)
 
         self._ask_button.clicked.connect(self._on_ask_clicked)
@@ -84,6 +92,16 @@ class MiniDicoPanel(QWidget):
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def retranslate_ui(self) -> None:
+        """Refresh all UI text."""
+        self._header.setText(f"<b>{tr('tab_lore')}</b>")
+        self._question_input.setPlaceholderText(tr("lore_search"))
+        
+        ask_text = tr("send")
+        if "ask" in tr("ready"):
+             ask_text = tr("ask")
+        self._ask_button.setText(ask_text)
 
     def configure(
         self,
@@ -95,21 +113,7 @@ class MiniDicoPanel(QWidget):
         temperature: float = 0.7,
         top_p: float = 1.0,
     ) -> None:
-        """Provide backend references for use by the worker.
-
-        Called by TabletopView.load_session() and reload_llm().
-        Must be called before any query is attempted.
-
-        Args:
-            llm:           The session LLMBackend instance.
-            vector_memory: The session VectorMemory instance.
-            save_id:       The active save ID for scoping lore queries.
-            lore_book:     Optional Lore_Book entry list to inject into
-                           Mini-Dico prompts for structured world knowledge.
-            global_lore:   Optional foundational world lore string.
-            temperature:   Sampling temperature (0.0 to 1.0).
-            top_p:         Nucleus sampling parameter (0.0 to 1.0).
-        """
+        """Provide backend references for use by the worker."""
         self._llm = llm
         self._vector_memory = vector_memory
         self._save_id = save_id
@@ -130,11 +134,11 @@ class MiniDicoPanel(QWidget):
             return
         if self._llm is None or self._vector_memory is None:
             self._answer_display.setPlainText(
-                "[Lore Reference not available - no active session.]"
+                f"[{tr('no_sessions')}]"
             )
             return
         if self._worker and self._worker.isRunning():
-            return  # Ignore while a query is in progress
+            return 
 
         self._ask_button.setEnabled(False)
         self._answer_display.clear()
@@ -171,5 +175,5 @@ class MiniDicoPanel(QWidget):
     @Slot(str)
     def _on_error(self, message: str) -> None:
         """Show the error in the answer display and re-enable Ask."""
-        self._answer_display.setPlainText(f"[Error: {message}]")
+        self._answer_display.setPlainText(f"[{tr('error')}: {message}]")
         self._ask_button.setEnabled(True)

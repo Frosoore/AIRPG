@@ -17,11 +17,12 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from llm_engine.base import LLMBackend
+from core.paths import CONFIG_DIR, SETTINGS_FILE, GLOBAL_DB_FILE
 
 
-_CONFIG_DIR: Path = Path.home() / ".config" / "AIRPG"
-_CONFIG_FILE: Path = _CONFIG_DIR / "settings.json"
-GLOBAL_DB_FILE: Path = _CONFIG_DIR / "global.db"
+_CONFIG_DIR: Path = CONFIG_DIR
+_CONFIG_FILE: Path = SETTINGS_FILE
+GLOBAL_DB_FILE: Path = GLOBAL_DB_FILE
 
 
 @dataclass
@@ -53,6 +54,7 @@ class AppConfig:
     ui_font_size: int = 14
     enable_audio: bool = True
     rag_chunk_count: int = 5
+    language: str = "en"
 
 
 def load_config() -> AppConfig:

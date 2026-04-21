@@ -217,7 +217,8 @@ class DeleteSaveTask(BaseDbTask):
             conn.commit()
 
         # 2. Delete Vector Memory directory if it exists
-        vector_dir = Path.home() / "AIRPG" / "vector" / self.save_id
+        from core.paths import VECTOR_DIR
+        vector_dir = VECTOR_DIR / self.save_id
         if vector_dir.exists():
             shutil.rmtree(str(vector_dir))
 
@@ -238,13 +239,15 @@ class TickModifiersTask(BaseDbTask):
 
 
 class PopulateEntitiesTask(BaseDbTask):
-    """Asynchronous entity generation using local Ollama.
+    """Asynchronous entity generation using LLM.
     
-    Reads world context, chunks large Lore_Book text, and inserts new
+    Reads world context or custom prompt, and inserts new
     entities into the database idempotently.
     """
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, mode: str = "auto", custom_text: str | None = None):
         super().__init__(db_path)
+        self.mode = mode
+        self.custom_text = custom_text
 
     def execute(self) -> int:
         from core.config import load_config, build_llm_from_config
@@ -260,7 +263,7 @@ class PopulateEntitiesTask(BaseDbTask):
             return 0
         
         # 1. Gather context
-        self.signals.status.emit("Reading world context...")
+        self.signals.status.emit("Gathering context...")
         with get_connection(self.db_path) as conn:
             # Universe Meta
             meta_rows = conn.execute("SELECT key, value FROM Universe_Meta;").fetchall()
@@ -291,34 +294,36 @@ class PopulateEntitiesTask(BaseDbTask):
 
         # 2. Prepare chunks
         chunks = []
-        
-        # Always include Global Lore as a distinct chunk if it exists
-        global_lore = meta.get("global_lore", "").strip()
-        if global_lore:
-            chunks.append(f"=== GLOBAL WORLD LORE ===\n{global_lore}")
+        if self.mode == "custom" and self.custom_text:
+            chunks.append(self.custom_text)
+        else:
+            # Always include Global Lore as a distinct chunk if it exists
+            global_lore = meta.get("global_lore", "").strip()
+            if global_lore:
+                chunks.append(f"=== GLOBAL WORLD LORE ===\n{global_lore}")
 
-        # Each lore entry becomes its own individual chunk
-        for name, content, cat in lore_rows:
-            cat = cat or "General"
-            chunks.append(f"=== CATEGORY: {cat} ===\n### Name: {name}\n{content}")
+            # Each lore entry becomes its own individual chunk
+            for name, content, cat in lore_rows:
+                cat = cat or "General"
+                chunks.append(f"=== CATEGORY: {cat} ===\n### Name: {name}\n{content}")
 
         if not chunks:
-            chunks = ["(No lore found)"]
+            chunks = ["(No context found)"]
 
         # 3. Process each chunk
         new_entities_found = []
         
         for i, chunk in enumerate(chunks):
-            self.signals.status.emit(f"Processing lore chunk {i+1}/{len(chunks)}...")
+            self.signals.status.emit(f"Processing chunk {i+1}/{len(chunks)}...")
             
-            prompt = build_populate_prompt(chunk, existing_names, stat_defs)
+            prompt = build_populate_prompt(chunk, existing_names, stat_defs,
+                                           custom_instruction=self.custom_text if self.mode == "custom" else None)
             
             try:
                 # Force JSON format at the API level
                 resp = llm.complete(prompt, response_format="json")
-                print(f"[POPULATE DEBUG] Raw Text: {resp.narrative_text} | Tool Call: {resp.tool_call}")
                 
-                # Resilient JSON parsing: handle both {"entities": [...]} and [...] directly
+                # Resilient JSON parsing
                 batch = []
                 if isinstance(resp.tool_call, list):
                     batch = resp.tool_call
@@ -333,17 +338,12 @@ class PopulateEntitiesTask(BaseDbTask):
                     allowed_stats = {s["name"].lower() for s in stat_defs}
                     for ent in batch:
                         if "stats" in ent and isinstance(ent["stats"], dict):
-                            # Case-insensitive filtering while preserving original key casing if it matches
                             valid_stats = {}
                             stat_name_map = {s["name"].lower(): s["name"] for s in stat_defs}
-                            
                             for k, v in ent["stats"].items():
                                 if k.lower() in allowed_stats:
                                     valid_stats[stat_name_map[k.lower()]] = v
-                                else:
-                                    print(f"[POPULATE] Filtering out invented stat: {k} for entity {ent.get('name')}")
                             ent["stats"] = valid_stats
-                            
                     new_entities_found.extend(batch)
             except Exception as e:
                 print(f"[POPULATE] LLM error on chunk {i}: {e}")
@@ -361,23 +361,14 @@ class PopulateEntitiesTask(BaseDbTask):
                 description = ent.get("description", "").strip()
                 stats_dict = ent.get("stats", {})
                 
-                if not name:
-                    continue
+                if not name: continue
                 
-                # Python-side ID generation for robustness
                 eid = re.sub(r'[^a-z0-9]', '_', name.lower())
                 eid = re.sub(r'_+', '_', eid).strip('_')
+                if not eid: continue
+                if etype not in ("npc", "faction"): etype = "npc"
+                if eid in existing_ids: continue
                 
-                if not eid:
-                    continue
-                
-                if etype not in ("npc", "faction"):
-                    etype = "npc"
-                
-                if eid in existing_ids:
-                    continue
-                
-                # Insert core record
                 conn.execute(
                     "INSERT INTO Entities (entity_id, name, entity_type, description, is_active) VALUES (?, ?, ?, ?, 1);",
                     (eid, name, etype, description)
@@ -385,7 +376,6 @@ class PopulateEntitiesTask(BaseDbTask):
                 existing_ids.add(eid)
                 existing_names.append(name)
                 
-                # Store dynamic stats provided by LLM if they are valid
                 if isinstance(stats_dict, dict):
                     for skey, sval in stats_dict.items():
                         lower_key = skey.lower()
@@ -395,9 +385,65 @@ class PopulateEntitiesTask(BaseDbTask):
                                 "INSERT INTO Entity_Stats (entity_id, stat_key, stat_value) VALUES (?, ?, ?);",
                                 (eid, real_name, str(sval))
                             )
-                
                 inserted_count += 1
             conn.commit()
+        
+        return inserted_count
+
+class PopulateLoreTask(BaseDbTask):
+    """Asynchronous lore expansion using LLM."""
+    def __init__(self, db_path: str, mode: str = "auto", custom_text: str | None = None):
+        super().__init__(db_path)
+        self.mode = mode
+        self.custom_text = custom_text
+
+    def execute(self) -> int:
+        from core.config import load_config, build_llm_from_config
+        from llm_engine.prompt_builder import build_populate_lore_prompt
+        
+        self.signals.status.emit("Initializing AI backend...")
+        cfg = load_config()
+        try:
+            llm = build_llm_from_config(cfg, model_override=cfg.extraction_model)
+        except Exception as e:
+            print(f"[POPULATE_LORE] Failed to build LLM backend: {e}")
+            return 0
+            
+        with get_connection(self.db_path) as conn:
+            row = conn.execute("SELECT value FROM Universe_Meta WHERE key = 'global_lore';").fetchone()
+            global_lore = row[0] if row else ""
+            ent_rows = conn.execute("SELECT name FROM Lore_Book;").fetchall()
+            existing_entries = [r[0] for r in ent_rows]
+
+        self.signals.status.emit("Generating lore expansion...")
+        prompt = build_populate_lore_prompt(global_lore, existing_entries, 
+                                            custom_instruction=self.custom_text if self.mode == "custom" else None)
+        
+        try:
+            resp = llm.complete(prompt, response_format="json")
+            batch = []
+            if isinstance(resp.tool_call, list): batch = resp.tool_call
+            elif isinstance(resp.tool_call, dict):
+                batch = resp.tool_call.get("lore_entries", [resp.tool_call] if "name" in resp.tool_call else [])
+            
+            inserted = 0
+            if batch:
+                with get_connection(self.db_path) as conn:
+                    for entry in batch:
+                        if entry.get("name") and entry["name"] not in existing_entries:
+                            conn.execute(
+                                "INSERT INTO Lore_Book (entry_id, category, name, content) VALUES (?, ?, ?, ?);",
+                                (uuid.uuid4().hex, entry.get("category", "General"), entry["name"], entry.get("content", ""))
+                            )
+                            inserted += 1
+                    conn.commit()
+                self.signals.status.emit(f"Lore expansion complete: {inserted} entries added.")
+                return inserted
+        except Exception as e:
+            print(f"[POPULATE_LORE] Error: {e}")
+        
+        self.signals.status.emit("Lore expansion complete: No new entries added.")
+        return 0
 
         self.signals.status.emit(f"Populate complete: {inserted_count} entities added.")
         return inserted_count

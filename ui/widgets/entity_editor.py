@@ -2,17 +2,12 @@
 ui/widgets/entity_editor.py
 
 Visual entity and stat editor for the Creator Studio.
-
-Users can add/delete entities and define their initial stats via a
-table widget - no raw JSON is ever shown.
-
-THREADING RULE: No I/O here.  Data is received via populate() (called
-from DbWorker signal) and returned via collect_data() to be written by
-DbWorker.
+Uses a spreadsheet-like grid for direct entity management.
 """
 
 from __future__ import annotations
 
+import uuid
 from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QComboBox,
@@ -22,380 +17,351 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QProgressBar,
     QPushButton,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
+    QHeaderView,
+    QAbstractItemView,
+    QMenu,
+    QInputDialog,
 )
+from core.localization import tr
 
 
 class EntityEditorWidget(QWidget):
-    """Visual entity list and stat editor for the Creator Studio Entities tab.
+    """Spreadsheet-like entity builder for the Creator Studio."""
 
-    Users see a list of entities on the left and a form on the right.
-    All data in/out is via Python dicts - no SQL.
-
-    The widget owns no I/O; populate() is called by a DbWorker signal and
-    collect_data() is called by CreatorStudioView before a save DbWorker task.
-    """
-
+    # Canonical keys
     _ENTITY_TYPES: list[str] = ["player", "npc", "faction", "world"]
 
-    populate_requested = Signal()
+    # Emits (mode: str, custom_text: str|None)
+    # mode is "auto" (from lore) or "custom"
+    populate_requested = Signal(str, object)
+    changed = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._entities_data: list[dict] = []
         self._stat_defs: list[dict] = []
-        self._selected_row: int = -1  # Row whose data is currently in the form
+        self._selected_row: int = -1
         self._setup_ui()
-
-    # ------------------------------------------------------------------
-    # Setup
-    # ------------------------------------------------------------------
 
     def _setup_ui(self) -> None:
         layout = QHBoxLayout(self)
         splitter = QSplitter(Qt.Horizontal)
 
-        # Left panel - entity list
+        # --- LEFT: ENTITY TABLE ---
         left = QWidget()
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.addWidget(QLabel("<b>Entities</b>"))
-
-        self._entity_list = QListWidget()
-        self._entity_list.currentRowChanged.connect(self._on_entity_selected)
-        left_layout.addWidget(self._entity_list)
-
-        btn_row = QHBoxLayout()
-        add_btn = QPushButton("Add")
-        del_btn = QPushButton("Delete")
         
-        btn_row.addWidget(add_btn)
-        btn_row.addWidget(del_btn)
-        left_layout.addLayout(btn_row)
+        header_row = QHBoxLayout()
+        self._header = QLabel(f"<b>{tr('tab_entities')}</b>")
+        header_row.addWidget(self._header)
+        header_row.addStretch()
         
-        self._populate_btn = QPushButton("Populate ✨")
-        self._populate_btn.setToolTip("Auto-generate NPCs and factions from lore using AI")
-        left_layout.addWidget(self._populate_btn)
+        # Dual Populate Menu
+        self._populate_btn = QPushButton(f"{tr('populate')} ✨")
+        self._populate_menu = QMenu(self)
+        self._pop_auto_action = self._populate_menu.addAction(tr("populate_tooltip") or "Generate from Lore/Stats")
+        self._pop_custom_action = self._populate_menu.addAction("Populate from Custom Text...")
+        self._populate_btn.setMenu(self._populate_menu)
         
-        self._progress = QProgressBar()
-        self._progress.setRange(0, 0) # Indeterminate mode
-        self._progress.setVisible(False)
-        left_layout.addWidget(self._progress)
+        self._pop_auto_action.triggered.connect(lambda: self.populate_requested.emit("auto", None))
+        self._pop_custom_action.triggered.connect(self._on_custom_populate_clicked)
+        
+        header_row.addWidget(self._populate_btn)
+        left_layout.addLayout(header_row)
 
-        add_btn.clicked.connect(self._on_add_entity)
-        del_btn.clicked.connect(self._on_delete_entity)
-        self._populate_btn.clicked.connect(self.populate_requested.emit)
+        # Input Row (Write before Add)
+        input_group = QHBoxLayout()
+        self._in_id = QLineEdit()
+        self._in_id.setPlaceholderText(tr("id"))
+        self._in_type = QComboBox()
+        for etype in self._ENTITY_TYPES:
+            self._in_type.addItem(tr(f"entity_{etype}"), etype)
+        self._in_name = QLineEdit()
+        self._in_name.setPlaceholderText(tr("name"))
+        
+        self._add_btn = QPushButton(f"{tr('add')} +")
+        self._add_btn.setStyleSheet("background-color: #27ae60; font-weight: bold;")
+        self._add_btn.clicked.connect(self._on_add_clicked)
 
-        # Right panel - entity form
+        input_group.addWidget(self._in_id, 2)
+        input_group.addWidget(self._in_type, 2)
+        input_group.addWidget(self._in_name, 3)
+        input_group.addWidget(self._add_btn, 1)
+        left_layout.addLayout(input_group)
+
+        # Entity Table
+        self._table = QTableWidget(0, 4)
+        self._table.setHorizontalHeaderLabels([
+            tr("id"), tr("type"), tr("name"), tr("description")
+        ])
+        self._table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self._table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self._table.setSelectionBehavior(QAbstractItemView.SelectItems)
+        self._table.setAlternatingRowColors(True)
+        self._table.currentCellChanged.connect(lambda r, c, pr, pc: self._on_row_selected())
+        self._table.itemChanged.connect(self._on_item_changed)
+        left_layout.addWidget(self._table)
+
+        self._del_btn = QPushButton(tr("delete"))
+        self._del_btn.setToolTip(f"{tr('delete')} (Del)")
+        self._del_btn.clicked.connect(self._on_delete_entity)
+        left_layout.addWidget(self._del_btn)
+
+        # --- RIGHT: STATS FOR SELECTED ENTITY ---
         right = QWidget()
-        right_layout = QFormLayout(right)
-
-        self._id_input = QLineEdit()
-        self._id_input.setPlaceholderText("e.g. player1")
-        self._type_combo = QComboBox()
-        self._type_combo.addItems(self._ENTITY_TYPES)
-        self._name_input = QLineEdit()
-        self._name_input.setPlaceholderText("e.g. Aria")
-        self._desc_input = QLineEdit()
-        self._desc_input.setPlaceholderText("e.g. A mysterious traveler.")
-
-        right_layout.addRow("Entity ID:", self._id_input)
-        right_layout.addRow("Type:", self._type_combo)
-        right_layout.addRow("Name:", self._name_input)
-        right_layout.addRow("Description:", self._desc_input)
-
-        stats_group = QGroupBox("Initial Stats")
-        stats_layout = QVBoxLayout(stats_group)
+        right_layout = QVBoxLayout(right)
+        
+        self._stats_group = QGroupBox(tr("initial_stats"))
+        stats_layout = QVBoxLayout(self._stats_group)
 
         self._stats_table = QTableWidget(0, 2)
-        self._stats_table.setHorizontalHeaderLabels(["Stat Name", "Initial Value"])
+        self._stats_table.setHorizontalHeaderLabels([tr("stat_name"), tr("initial_value")])
         self._stats_table.horizontalHeader().setStretchLastSection(True)
+        self._stats_table.setSelectionBehavior(QAbstractItemView.SelectItems)
         stats_layout.addWidget(self._stats_table)
 
         stat_btn_row = QHBoxLayout()
-        add_stat_btn = QPushButton("Add Stat")
-        rem_stat_btn = QPushButton("Remove Stat")
-        stat_btn_row.addWidget(add_stat_btn)
-        stat_btn_row.addWidget(rem_stat_btn)
+        self._add_stat_btn = QPushButton(f"{tr('add_stat')} +")
+        self._add_all_stats_btn = QPushButton("Add All Stats")
+        self._rem_stat_btn = QPushButton(tr("remove_stat"))
+        
+        stat_btn_row.addWidget(self._add_stat_btn)
+        stat_btn_row.addWidget(self._add_all_stats_btn)
+        stat_btn_row.addWidget(self._rem_stat_btn)
         stats_layout.addLayout(stat_btn_row)
 
-        right_layout.addRow(stats_group)
+        self._add_stat_btn.clicked.connect(lambda: self._on_add_stat_row())
+        self._add_all_stats_btn.clicked.connect(self._on_add_all_stats)
+        self._rem_stat_btn.clicked.connect(self._on_remove_stat_row)
 
-        add_stat_btn.clicked.connect(self._on_add_stat_row)
-        rem_stat_btn.clicked.connect(self._on_remove_stat_row)
+        right_layout.addWidget(self._stats_group)
+        right_layout.addStretch()
 
         splitter.addWidget(left)
         splitter.addWidget(right)
-        splitter.setSizes([200, 400])
+        splitter.setSizes([500, 300])
         layout.addWidget(splitter)
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
+    def retranslate_ui(self) -> None:
+        self._header.setText(f"<b>{tr('tab_entities')}</b>")
+        self._add_btn.setText(f"{tr('add')} +")
+        self._del_btn.setText(tr("delete"))
+        self._populate_btn.setText(f"{tr('populate')} ✨")
+        
+        self._in_id.setPlaceholderText(tr("id"))
+        self._in_name.setPlaceholderText(tr("name"))
+        
+        self._table.setHorizontalHeaderLabels([
+            tr("id"), tr("type"), tr("name"), tr("description")
+        ])
+        
+        self._stats_group.setTitle(tr("initial_stats"))
+        self._add_stat_btn.setText(f"{tr('add_stat')} +")
+        self._rem_stat_btn.setText(tr("remove_stat"))
+        self._stats_table.setHorizontalHeaderLabels([tr("stat_name"), tr("initial_value")])
+
     @Slot(list)
     def populate(self, entities: list[dict]) -> None:
-        """Populate the entity list from a list of entity dicts."""
-        self._selected_row = -1
-        self._entities_data = entities
-        self._entity_list.clear()
-        for entity in entities:
-            self._entity_list.addItem(
-                f"{entity.get('name', '?')} ({entity.get('entity_id', '?')})"
-            )
-        if entities:
-            self._entity_list.setCurrentRow(0)
+        """Load entity data into the table."""
+        self._table.blockSignals(True)
+        self._table.setRowCount(0)
+        self._entities_data = [dict(e) for e in entities] # Deepish copy
+        
+        for ent in self._entities_data:
+            self._add_entity_row(ent)
+        
+        self._table.blockSignals(False)
+        if self._table.rowCount() > 0:
+            self._table.setCurrentCell(0, 2) # Select name of first entity
 
     @Slot(list)
     def set_stat_definitions(self, stat_defs: list[dict]) -> None:
-        """Update the list of allowed stat definitions."""
         self._stat_defs = stat_defs
-        # If an entity is currently selected, we should ideally refresh its table
-        # but _on_entity_selected is usually called after this during a load.
-
-    def add_entities(self, new_entities: list[dict]) -> None:
-        """Append multiple entities to the current list without clearing."""
-        self._sync_current_form()
-        for ent in new_entities:
-            self._entities_data.append(ent)
-            self._entity_list.addItem(
-                f"{ent.get('name', '?')} ({ent.get('entity_id', '?')})"
-            )
-        if new_entities:
-            self._entity_list.setCurrentRow(len(self._entities_data) - 1)
-
-    def set_populate_enabled(self, enabled: bool) -> None:
-        """Enable or disable the AI populate button (e.g. during generation)."""
-        self._populate_btn.setEnabled(enabled)
-        self._progress.setVisible(not enabled)
-        if enabled:
-            self._populate_btn.setText("Populate ✨")
-        else:
-            self._populate_btn.setText("Generating...")
 
     def collect_data(self) -> list[dict]:
-        """Return the current form state as a list of entity dicts."""
-        self._sync_current_form()
-        return list(self._entities_data)
+        """Gather data from tables back into a list of dicts."""
+        self._sync_stats_from_ui()
+        # Ensure description and other fields in _entities_data are up to date from table
+        for r in range(self._table.rowCount()):
+            eid = self._table.item(r, 0).text().strip()
+            # Find in data (matching by original position or ID)
+            # For simplicity, we assume row index matches _entities_data index
+            if r < len(self._entities_data):
+                self._entities_data[r]["entity_id"] = eid
+                self._entities_data[r]["name"] = self._table.item(r, 2).text().strip()
+                self._entities_data[r]["description"] = self._table.item(r, 3).text().strip()
+                # Type is set on add and kept in it_type itemData or text
+        return self._entities_data
 
     # ------------------------------------------------------------------
-    # Slots
+    # Implementation
     # ------------------------------------------------------------------
 
-    @Slot(int)
-    def _on_entity_selected(self, row: int) -> None:
-        """Flush the previous entity's form data, then load the new selection."""
-        self._sync_current_form()
-        self._selected_row = row
-
-        if row < 0 or row >= len(self._entities_data):
-            return
-        entity = self._entities_data[row]
-
-        self._id_input.setText(entity.get("entity_id", ""))
-        type_idx = self._type_combo.findText(entity.get("entity_type", "npc"))
-        self._type_combo.setCurrentIndex(max(0, type_idx))
-        self._name_input.setText(entity.get("name", ""))
-        self._desc_input.setText(entity.get("description", ""))
-
-        stats = entity.get("stats", {})
-        self._stats_table.setRowCount(0)
-        for key, value in stats.items():
-            self._add_stat_row_with_data(key, value)
+    def _add_entity_row(self, ent: dict) -> None:
+        row = self._table.rowCount()
+        self._table.insertRow(row)
+        
+        it_id = QTableWidgetItem(ent.get("entity_id", ""))
+        
+        etype = ent.get("entity_type", "npc")
+        it_type = QTableWidgetItem(tr(f"entity_{etype}"))
+        it_type.setData(Qt.UserRole, etype)
+        it_type.setFlags(it_type.flags() & ~Qt.ItemIsEditable)
+        
+        it_name = QTableWidgetItem(ent.get("name", ""))
+        it_desc = QTableWidgetItem(ent.get("description", ""))
+        
+        self._table.setItem(row, 0, it_id)
+        self._table.setItem(row, 1, it_type)
+        self._table.setItem(row, 2, it_name)
+        self._table.setItem(row, 3, it_desc)
 
     @Slot()
-    def _on_add_entity(self) -> None:
-        """Flush current form then add a new blank entity."""
-        self._sync_current_form()
-        new_entity: dict = {
-            "entity_id": f"entity_{len(self._entities_data) + 1}",
-            "entity_type": "npc",
-            "name": "New Entity",
+    def _on_add_clicked(self) -> None:
+        """Create entity from input row."""
+        eid = self._in_id.text().strip() or f"entity_{uuid.uuid4().hex[:6]}"
+        name = self._in_name.text().strip() or tr("entity_npc").upper()
+        etype = self._in_type.currentData()
+        
+        new_ent = {
+            "entity_id": eid,
+            "entity_type": etype,
+            "name": name,
             "description": "",
-            "stats": {},
+            "stats": {}
         }
-        self._entities_data.append(new_entity)
-        self._entity_list.addItem(
-            f"{new_entity['name']} ({new_entity['entity_id']})"
-        )
-        self._entity_list.setCurrentRow(len(self._entities_data) - 1)
+        self._entities_data.append(new_ent)
+        self._add_entity_row(new_ent)
+        self._in_id.clear()
+        self._in_name.clear()
+        self._table.setCurrentCell(self._table.rowCount()-1, 2)
+        self.changed.emit()
 
     @Slot()
-    def _on_delete_entity(self) -> None:
-        """Delete the currently selected entity."""
-        row = self._selected_row
+    def _on_row_selected(self) -> None:
+        """Load stats for the selected entity."""
+        self._sync_stats_from_ui()
+        row = self._table.currentRow()
+        self._selected_row = row
+        
+        self._stats_table.setRowCount(0)
         if row < 0 or row >= len(self._entities_data):
             return
-
-        # 1. Block signals to prevent premature UI refreshes
-        self._entity_list.blockSignals(True)
-
-        # 2. Delete data and visual item
-        del self._entities_data[row]
-        self._entity_list.takeItem(row)
-
-        # 3. Reset local selection BEFORE unblocking
-        self._selected_row = -1
-
-        # 4. Unblock signals
-        self._entity_list.blockSignals(False)
-
-        # 5. Force selection of the new item at the same position (or last)
-        new_row = self._entity_list.currentRow()
-        if new_row >= 0:
-            self._on_entity_selected(new_row)
-        else:
-            # Clear form if no entities left
-            self._id_input.clear()
-            self._name_input.clear()
-            self._desc_input.clear()
-            self._stats_table.setRowCount(0)
+            
+        ent = self._entities_data[row]
+        stats = ent.get("stats", {})
+        for k, v in stats.items():
+            self._add_stat_row_with_data(k, v)
 
     @Slot()
     def _on_add_stat_row(self) -> None:
-        """Append a blank stat row using the first available definition."""
-        if not self._stat_defs:
-            # Do nothing if no stats are defined in the universe
-            return
-
-        first_stat = self._stat_defs[0]["name"]
-        self._add_stat_row_with_data(first_stat, "")
-
-    @Slot()
-    def _on_remove_stat_row(self) -> None:
-        """Remove the currently selected stat row."""
-        row = self._stats_table.currentRow()
-        if row >= 0:
-            self._stats_table.removeRow(row)
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
+        """Add a blank stat row to the selected entity."""
+        self._add_stat_row_with_data("", "")
+        self.changed.emit()
 
     def _add_stat_row_with_data(self, key: str, value: str) -> None:
-        if not self._stat_defs:
-            return
-
-        row_idx = self._stats_table.rowCount()
-        self._stats_table.insertRow(row_idx)
-
-        # Stat Key ComboBox - NOT editable, strictly from definitions
+        r = self._stats_table.rowCount()
+        self._stats_table.insertRow(r)
+        
         key_combo = QComboBox()
-        key_combo.setEditable(False)
         stat_names = [s["name"] for s in self._stat_defs]
-        
-        # Include the key only if it matches a definition or for initial loading
         if key and key not in stat_names:
-            # If we load an old save with a deleted stat, we show it but user
-            # will have to change it to a valid one to stay consistent.
             stat_names.insert(0, key)
-        
         key_combo.addItems(stat_names)
         key_combo.setCurrentText(key)
-        self._stats_table.setCellWidget(row_idx, 0, key_combo)
-
-        # Update value widget when key changes
-        key_combo.currentTextChanged.connect(self._on_stat_key_changed)
+        self._stats_table.setCellWidget(r, 0, key_combo)
+        key_combo.currentTextChanged.connect(lambda t: self._update_stat_value_widget(r, t))
         
-        self._update_value_widget(row_idx, key, value)
+        self._update_stat_value_widget(r, key, value)
 
-    @Slot(str)
-    def _on_stat_key_changed(self, stat_name: str) -> None:
-        # Find which row's combo box sent the signal
-        combo = self.sender()
-        if not isinstance(combo, QComboBox):
-            return
-        
-        # Find the row of this widget
-        for r in range(self._stats_table.rowCount()):
-            if self._stats_table.cellWidget(r, 0) == combo:
-                self._update_value_widget(r, stat_name)
-                break
-
-    def _update_value_widget(self, row: int, stat_name: str, initial_value: str = None) -> None:
-        # Find definition
+    def _update_stat_value_widget(self, row: int, stat_name: str, initial_val: str = None) -> None:
         sdef = next((s for s in self._stat_defs if s["name"] == stat_name), None)
-        
         if not sdef:
-            # Fallback
-            edit = QLineEdit(str(initial_value or ""))
-            self._stats_table.setCellWidget(row, 1, edit)
+            self._stats_table.setCellWidget(row, 1, QLineEdit(str(initial_val or "")))
             return
 
         vtype = sdef.get("value_type", "numeric")
         params = sdef.get("parameters", {})
-
         if vtype == "numeric":
             spin = QDoubleSpinBox()
             spin.setRange(float(params.get("min", -999999)), float(params.get("max", 999999)))
-            try:
-                val = float(initial_value) if initial_value not in (None, "") else float(params.get("min", 0))
-                spin.setValue(val)
-            except (ValueError, TypeError):
-                spin.setValue(float(params.get("min", 0)))
+            val = float(initial_val) if initial_val not in (None, "") else float(params.get("min", 0))
+            spin.setValue(val)
             self._stats_table.setCellWidget(row, 1, spin)
         elif vtype == "categorical":
-            combo = QComboBox()
+            cb = QComboBox()
             options = params.get("options", [])
-            combo.addItems(options)
-            if initial_value in options:
-                combo.setCurrentText(initial_value)
-            self._stats_table.setCellWidget(row, 1, combo)
-        else:
-            edit = QLineEdit(str(initial_value or ""))
-            self._stats_table.setCellWidget(row, 1, edit)
+            cb.addItems(options)
+            if initial_val in options: cb.setCurrentText(initial_val)
+            self._stats_table.setCellWidget(row, 1, cb)
 
-    def _sync_current_form(self) -> None:
-        """Write form values back into _entities_data for the row being edited."""
-        row = self._selected_row
-        if row < 0 or row >= len(self._entities_data):
+    def _sync_stats_from_ui(self) -> None:
+        """Save current stats table into the active entity dict."""
+        if self._selected_row < 0 or self._selected_row >= len(self._entities_data):
             return
-
-        stats: dict[str, str] = {}
+            
+        stats = {}
         for r in range(self._stats_table.rowCount()):
-            # Key
-            key_widget = self._stats_table.cellWidget(r, 0)
-            if isinstance(key_widget, QComboBox):
-                key = key_widget.currentText().strip()
-            else:
-                key_item = self._stats_table.item(r, 0)
-                key = key_item.text().strip() if key_item else ""
+            key_w = self._stats_table.cellWidget(r, 0)
+            val_w = self._stats_table.cellWidget(r, 1)
+            
+            key = key_w.currentText() if isinstance(key_w, QComboBox) else ""
+            if isinstance(val_w, QDoubleSpinBox): val = str(val_w.value())
+            elif isinstance(val_w, QComboBox): val = val_w.currentText()
+            else: val = val_w.text() if hasattr(val_w, "text") else ""
+            
+            if key: stats[key] = val
+        self._entities_data[self._selected_row]["stats"] = stats
 
-            # Value
-            val_widget = self._stats_table.cellWidget(r, 1)
-            if isinstance(val_widget, QDoubleSpinBox):
-                value = str(val_widget.value())
-            elif isinstance(val_widget, QComboBox):
-                value = val_widget.currentText()
-            elif isinstance(val_widget, QLineEdit):
-                value = val_widget.text().strip()
-            else:
-                val_item = self._stats_table.item(r, 1)
-                value = val_item.text().strip() if val_item else ""
+    @Slot()
+    def _on_add_all_stats(self) -> None:
+        if self._selected_row < 0: return
+        existing_keys = [self._stats_table.cellWidget(r, 0).currentText() 
+                         for r in range(self._stats_table.rowCount()) 
+                         if isinstance(self._stats_table.cellWidget(r, 0), QComboBox)]
+        
+        for sdef in self._stat_defs:
+            if sdef["name"] not in existing_keys:
+                self._add_stat_row_with_data(sdef["name"], "")
+        self.changed.emit()
 
-            if key:
-                stats[key] = value
+    @Slot()
+    def _on_remove_stat_row(self) -> None:
+        r = self._stats_table.currentRow()
+        if r >= 0: self._stats_table.removeRow(r)
+        self.changed.emit()
 
-        entity_id = self._id_input.text().strip()
-        name = self._name_input.text().strip()
-        description = self._desc_input.text().strip()
+    @Slot()
+    def _on_delete_entity(self) -> None:
+        indices = self._table.selectionModel().selectedRows()
+        rows = sorted([i.row() for i in indices], reverse=True) if indices else [self._table.currentRow()]
+        for r in rows:
+            if 0 <= r < len(self._entities_data):
+                del self._entities_data[r]
+                self._table.removeRow(r)
+        self.changed.emit()
 
-        self._entities_data[row] = {
-            "entity_id": entity_id,
-            "entity_type": self._type_combo.currentText(),
-            "name": name,
-            "description": description,
-            "stats": stats,
-        }
+    def _on_item_changed(self, item: QTableWidgetItem) -> None:
+        self.changed.emit()
 
-        # Refresh the list item text immediately
-        item = self._entity_list.item(row)
-        if item:
-            item.setText(f"{name or '?'} ({entity_id or '?'})")
+    def _on_custom_populate_clicked(self) -> None:
+        text, ok = QInputDialog.getMultiLineText(self, "Populate ✨", "Describe the entities to generate (NPCs, Factions...):")
+        if ok and text.strip():
+            self.populate_requested.emit("custom", text.strip())
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key_Delete:
+            self._on_delete_entity()
+        else:
+            super().keyPressEvent(event)

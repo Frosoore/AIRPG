@@ -19,6 +19,7 @@ def check_db_worker():
             'rules_loaded', 'lore_book_loaded', 'scheduled_events_loaded',
             'personas_loaded', 'library_loaded', 'saves_loaded',
             'history_loaded', 'modifiers_ticked', 'variant_updated',
+            'full_universe_loaded',
             'save_complete', 'error_occurred', 'status_update'
         ]
         
@@ -81,10 +82,15 @@ def run_checks():
         
     if not check_imports():
         print("\nERROR: Some dependencies are missing or broken.")
-        print("If you are on Linux, ensure you have installed system requirements:")
-        print("  sudo apt install python3-venv libxcb-cursor0")
+        if sys.platform != "win32":
+            print("If you are on Linux, ensure you have installed system requirements:")
+            print("  sudo apt install python3-venv libxcb-cursor0")
+        
         print("\nTry recreating the virtual environment:")
-        print("  rm -rf .venv && bash run.sh")
+        if sys.platform == "win32":
+            print("  rd /s /q .venv && run.bat")
+        else:
+            print("  rm -rf .venv && bash run.sh")
         sys.exit(1)
         
     print("--- Startup Validation Passed ---\n")

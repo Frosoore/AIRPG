@@ -9,8 +9,9 @@ import sys
 import logging
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
+from core.paths import CACHE_DIR
 
-_LOG_DIR = Path.home() / ".cache" / "AIRPG"
+_LOG_DIR = CACHE_DIR
 _LOG_FILE = _LOG_DIR / "airpg.log"
 
 def setup_logger(name: str = "AIRPG") -> logging.Logger:

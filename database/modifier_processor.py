@@ -80,10 +80,8 @@ class ModifierProcessor:
                 # Non-numeric stat — skip this modifier
                 continue
             new_val = current + delta
-            if new_val == int(new_val):
-                result[stat_key] = str(int(new_val))
-            else:
-                result[stat_key] = str(new_val)
+            from core.localization import fmt_num
+            result[stat_key] = fmt_num(new_val)
 
         return result
 

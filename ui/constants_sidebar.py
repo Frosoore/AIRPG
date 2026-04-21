@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from core.localization import tr
 
 
 class ConstantsSidebar(QWidget):
@@ -47,8 +48,8 @@ class ConstantsSidebar(QWidget):
         layout.setSpacing(4)
         layout.setContentsMargins(4, 4, 4, 4)
 
-        header = QLabel("<b>World State</b>")
-        layout.addWidget(header)
+        self._header = QLabel(f"<b>{tr('tab_meta')}</b>")
+        layout.addWidget(self._header)
 
         self._tabs = QTabWidget()
         
@@ -82,26 +83,22 @@ class ConstantsSidebar(QWidget):
         self._time_layout.addStretch()
         self._time_scroll.setWidget(self._time_content)
 
-        self._tabs.addTab(self._stats_scroll, "Stats")
-        self._tabs.addTab(self._inv_scroll, "Inventory")
-        self._tabs.addTab(self._time_scroll, "Timeline")
+        self._tabs.addTab(self._stats_scroll, tr("stats"))
+        self._tabs.addTab(self._inv_scroll, tr("inventory"))
+        self._tabs.addTab(self._time_scroll, tr("timeline"))
         layout.addWidget(self._tabs)
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+    def retranslate_ui(self) -> None:
+        """Refresh tab titles and header."""
+        self._header.setText(f"<b>{tr('tab_meta')}</b>")
+        self._tabs.setTabText(0, tr("stats"))
+        self._tabs.setTabText(1, tr("inventory"))
+        self._tabs.setTabText(2, tr("timeline"))
 
     @Slot(list)
     def refresh(self, entity_snapshots: list[dict]) -> None:
-        """Rebuild the stats display from fresh entity snapshot data.
-
-        Called exclusively via Signal/Slot from the main thread after
-        DbWorker.stats_loaded is emitted.
-
-        Args:
-            entity_snapshots: List of dicts with keys:
-                              entity_id, name, entity_type, stats (dict).
-        """
+        """Rebuild the stats display from fresh entity snapshot data."""
+        from core.localization import tr, fmt_num
         # Remove all existing widgets (except the trailing stretch)
         while self._entities_layout.count() > 1:
             item = self._entities_layout.takeAt(0)
@@ -109,7 +106,7 @@ class ConstantsSidebar(QWidget):
                 item.widget().deleteLater()
 
         if not entity_snapshots:
-            placeholder = QLabel("(No entities)")
+            placeholder = QLabel(f"({tr('no_sessions')})")
             placeholder.setStyleSheet("color: gray;")
             self._entities_layout.insertWidget(0, placeholder)
             return
@@ -120,11 +117,19 @@ class ConstantsSidebar(QWidget):
             entity_id: str = snap.get("entity_id", "unknown")
             name: str = snap.get("name", entity_id)
             entity_type: str = snap.get("entity_type", "")
-            stats: dict = snap.get("stats") or {}  # Defensive: None treated as empty
+            stats: dict = snap.get("stats") or {} 
 
             group_title = f"{name}"
             if entity_type:
-                group_title += f" [{entity_type}]"
+                # Localize entity type
+                translated_type = tr(f"entity_{entity_type}")
+                # Use localized spacing
+                from core.config import load_config
+                lang = getattr(load_config(), "language", "en")
+                if lang in ("zh", "ja", "ko"):
+                    group_title += f"[{translated_type}]"
+                else:
+                    group_title += f" [{translated_type}]"
             group = QGroupBox(group_title)
             group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             form = QFormLayout(group)
@@ -132,13 +137,20 @@ class ConstantsSidebar(QWidget):
 
             if stats:
                 for stat_key, stat_value in stats.items():
-                    key_label = QLabel(f"{stat_key}:")
+                    # Use stat_fmt if available
+                    label_text = tr("stat_fmt", key=stat_key, val="").rstrip(":").rstrip(" :").rstrip("：")
+                    from core.config import load_config
+                    lang = getattr(load_config(), "language", "en")
+                    colon = "：" if lang in ("zh", "ja") else ":"
+                    if lang == "fr": colon = " :"
+                    
+                    key_label = QLabel(label_text + colon)
                     key_label.setStyleSheet("font-size: 11px;")
-                    val_label = QLabel(str(stat_value))
+                    val_label = QLabel(fmt_num(stat_value))
                     val_label.setStyleSheet("font-size: 11px; font-weight: bold;")
                     form.addRow(key_label, val_label)
             else:
-                form.addRow(QLabel("(no stats)"))
+                form.addRow(QLabel(f"({tr('no_sessions')})"))
 
             # Insert before the trailing stretch
             insert_idx = max(0, self._entities_layout.count() - 1)
@@ -146,11 +158,7 @@ class ConstantsSidebar(QWidget):
 
     @Slot(dict)
     def refresh_inventory(self, inventory_data: dict) -> None:
-        """Rebuild the inventory display.
-        
-        Args:
-            inventory_data: Dict mapping entity_id -> list of item dicts.
-        """
+        """Rebuild the inventory display."""
         # Remove all existing widgets (except the trailing stretch)
         while self._inv_layout.count() > 1:
             item = self._inv_layout.takeAt(0)
@@ -158,7 +166,7 @@ class ConstantsSidebar(QWidget):
                 item.widget().deleteLater()
 
         if not inventory_data:
-            placeholder = QLabel("(No inventories)")
+            placeholder = QLabel(f"({tr('no_sessions')})")
             placeholder.setStyleSheet("color: gray;")
             self._inv_layout.insertWidget(0, placeholder)
             return
@@ -167,7 +175,7 @@ class ConstantsSidebar(QWidget):
             if not items:
                 continue
                 
-            group = QGroupBox(f"{entity_id}'s Inventory")
+            group = QGroupBox(f"{entity_id}")
             group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             form = QFormLayout(group)
             form.setSpacing(2)
@@ -198,11 +206,7 @@ class ConstantsSidebar(QWidget):
 
     @Slot(list)
     def refresh_timeline(self, timeline_events: list[dict]) -> None:
-        """Rebuild the timeline display.
-        
-        Args:
-            timeline_events: List of dicts with keys: turn_id, in_game_time, description.
-        """
+        """Rebuild the timeline display."""
         # Remove all existing widgets (except the trailing stretch)
         while self._time_layout.count() > 1:
             item = self._time_layout.takeAt(0)
@@ -210,7 +214,7 @@ class ConstantsSidebar(QWidget):
                 item.widget().deleteLater()
 
         if not timeline_events:
-            placeholder = QLabel("(No recorded timeline events)")
+            placeholder = QLabel(f"({tr('no_sessions')})")
             placeholder.setStyleSheet("color: gray;")
             self._time_layout.insertWidget(0, placeholder)
             return
@@ -221,7 +225,8 @@ class ConstantsSidebar(QWidget):
             turn_id = event.get("turn_id", 0)
             desc = event.get("description", "")
             
-            group = QGroupBox(f"Turn {turn_id} - {time_str}")
+            turn_part = tr("turn_fmt", count=turn_id)
+            group = QGroupBox(f"{turn_part} - {time_str}")
             group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             vbox = QVBoxLayout(group)
             

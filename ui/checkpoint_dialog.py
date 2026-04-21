@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QVBoxLayout,
 )
+from core.localization import tr
 
 
 class CheckpointDialog(QDialog):
@@ -25,18 +26,18 @@ class CheckpointDialog(QDialog):
 
     def __init__(self, checkpoints: list[int], parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Rewind to Checkpoint")
+        self.setWindowTitle(tr("rewind_title"))
         self.setMinimumWidth(280)
         self._selected: int | None = None
         # Most-recent first in the list
         self._turn_ids = list(reversed(checkpoints))
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Select a turn to rewind to:"))
+        layout.addWidget(QLabel(tr("rewind_title") + ":"))
 
         self._list = QListWidget()
         for turn_id in self._turn_ids:
-            self._list.addItem(f"Turn {turn_id}")
+            self._list.addItem(tr("turn_fmt", count=turn_id))
         if self._list.count():
             self._list.setCurrentRow(0)
         layout.addWidget(self._list)
@@ -44,6 +45,10 @@ class CheckpointDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
         )
+        # Manually translate buttons if needed or use defaults if they map to system locale
+        # PySide6 defaults often follow system language but let's be explicit
+        buttons.button(QDialogButtonBox.Cancel).setText(tr("cancel"))
+        
         buttons.accepted.connect(self._on_accepted)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)

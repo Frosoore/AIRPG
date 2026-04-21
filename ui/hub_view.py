@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
 
 from ui.widgets.universe_card import UniverseCard
 from core.config import GLOBAL_DB_FILE
+from core.localization import tr
 from workers.db_helpers import (
     create_new_save,
     load_saves,
@@ -50,6 +51,7 @@ from workers.db_helpers import (
 )
 from workers.db_worker import DbWorker
 from workers.import_export_worker import ImportExportWorker
+from core.paths import UNIVERSES_DIR
 
 if TYPE_CHECKING:
     from ui.main_window import MainWindow
@@ -64,7 +66,7 @@ class HubView(QWidget):
     """
 
     _GRID_COLUMNS: int = 3
-    _LIBRARY_DIR: str = str(Path.home() / "AIRPG" / "universes")
+    _LIBRARY_DIR: str = str(UNIVERSES_DIR)
 
     def __init__(self, main_window: "MainWindow", parent=None) -> None:
         super().__init__(parent)
@@ -90,17 +92,20 @@ class HubView(QWidget):
 
         # Header toolbar
         toolbar = QHBoxLayout()
-        header_label = QLabel("Your Library")
-        header_label.setStyleSheet("font-size: 24px; font-weight: bold;")
-        toolbar.addWidget(header_label)
+        self._header_label = QLabel(tr("hub_title"))
+        self._header_label.setStyleSheet("font-size: 24px; font-weight: bold;")
+        toolbar.addWidget(self._header_label)
         toolbar.addStretch()
 
-        import_st_btn = QPushButton("Import SillyTavern Card")
-        import_btn = QPushButton("Import Universe")
-        create_btn = QPushButton("Create New Universe")
-        toolbar.addWidget(import_st_btn)
-        toolbar.addWidget(import_btn)
-        toolbar.addWidget(create_btn)
+        self._import_st_btn = QPushButton(tr("import_st"))
+        self._import_st_btn.setToolTip("Import a character card from SillyTavern format.")
+        self._import_btn = QPushButton(tr("import"))
+        self._import_btn.setToolTip("Import an existing .airpg universe file.")
+        self._create_btn = QPushButton(tr("new_universe"))
+        self._create_btn.setToolTip("Create a brand new empty universe.")
+        toolbar.addWidget(self._import_st_btn)
+        toolbar.addWidget(self._import_btn)
+        toolbar.addWidget(self._create_btn)
         layout.addLayout(toolbar)
 
         # Scroll area for universe cards
@@ -125,9 +130,9 @@ class HubView(QWidget):
         layout.addWidget(self._scroll_area)
 
         # Connections
-        import_st_btn.clicked.connect(self._on_import_st_clicked)
-        import_btn.clicked.connect(self._on_import_clicked)
-        create_btn.clicked.connect(self._on_create_new_clicked)
+        self._import_st_btn.clicked.connect(self._on_import_st_clicked)
+        self._import_btn.clicked.connect(self._on_import_clicked)
+        self._create_btn.clicked.connect(self._on_create_new_clicked)
 
     # ------------------------------------------------------------------
     # Public API
@@ -142,6 +147,16 @@ class HubView(QWidget):
         self._db_worker.library_loaded.connect(self._on_library_loaded)
         self._db_worker.error_occurred.connect(self._on_worker_error)
         self._db_worker.load_library(self._LIBRARY_DIR)
+
+    def retranslate_ui(self) -> None:
+        """Refresh all UI text for the current language."""
+        self._header_label.setText(tr("hub_title"))
+        self._import_st_btn.setText(tr("import_st"))
+        self._import_btn.setText(tr("import"))
+        self._create_btn.setText(tr("new_universe"))
+        
+        # Refresh cards to update their internal buttons (Play, Edit, etc)
+        self.refresh_library()
 
     @Slot(list)
     def _on_library_loaded(self, universes: list[dict]) -> None:
@@ -159,6 +174,8 @@ class HubView(QWidget):
             db_path = u["db_path"]
             if db_path in self._active_cards:
                 card = self._active_cards[db_path]
+                # Retranslate the card labels
+                if hasattr(card, "retranslate_ui"): card.retranslate_ui()
             else:
                 card = UniverseCard(
                     db_path,
@@ -183,10 +200,7 @@ class HubView(QWidget):
                 if item.widget():
                     item.widget().deleteLater()
                 
-            placeholder = QLabel(
-                "No universes installed yet.\n"
-                "Import a .airpg file or create a new universe to get started."
-            )
+            placeholder = QLabel(tr("no_universes_placeholder"))
             placeholder.setAlignment(Qt.AlignCenter)
             placeholder.setStyleSheet("color: gray; font-size: 14px;")
             self._grid_layout.addWidget(placeholder, 0, 0)
@@ -200,7 +214,7 @@ class HubView(QWidget):
         """Open a file dialog and start ImportExportWorker in import_st mode."""
         st_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Import SillyTavern Card",
+            tr("import_st"),
             str(Path.home()),
             "SillyTavern Cards (*.png *.json);;All Files (*)",
         )
@@ -208,7 +222,8 @@ class HubView(QWidget):
             return
 
         self._progress_dialog = QProgressDialog(
-            "Importing SillyTavern card...", "Cancel", 0, 4, self
+            tr("importing_st") if "importing_st" in tr("ready") else "Importing SillyTavern card...", 
+            tr("cancel"), 0, 4, self
         )
         self._progress_dialog.setWindowModality(Qt.WindowModal)
         self._progress_dialog.setValue(0)
@@ -230,7 +245,7 @@ class HubView(QWidget):
         """Open a file dialog and start ImportExportWorker in import mode."""
         airpg_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Import Universe",
+            tr("import"),
             str(Path.home()),
             "AIRPG Universe (*.airpg);;All Files (*)",
         )
@@ -238,7 +253,8 @@ class HubView(QWidget):
             return
 
         self._progress_dialog = QProgressDialog(
-            "Importing universe...", "Cancel", 0, 4, self
+            tr("importing_universe") if "importing_universe" in tr("ready") else "Importing universe...", 
+            tr("cancel"), 0, 4, self
         )
         self._progress_dialog.setWindowModality(Qt.WindowModal)
         self._progress_dialog.setValue(0)
@@ -260,8 +276,8 @@ class HubView(QWidget):
         """Prompt for a universe name and transition to Creator Studio."""
         name, ok = QInputDialog.getText(
             self,
-            "New Universe",
-            "Enter a name for your new universe:",
+            tr("new_universe"),
+            tr("universe_name"),
         )
         if not ok or not name.strip():
             return
@@ -295,10 +311,8 @@ class HubView(QWidget):
         universe_name = Path(db_path).stem.replace("_", " ").title()
         reply = QMessageBox.warning(
             self,
-            "Delete Universe",
-            f"<b>Permanently delete '{universe_name}'?</b><br><br>"
-            "This will remove the universe database and ALL save data. "
-            "This action cannot be undone.",
+            tr("delete_universe"),
+            tr("confirm_delete_universe", name=universe_name),
             QMessageBox.Yes | QMessageBox.Cancel,
             QMessageBox.Cancel,
         )
@@ -307,18 +321,17 @@ class HubView(QWidget):
         try:
             import os
             os.remove(db_path)
+            self.refresh_library()
+            self._main_window.on_status_update(tr("ready"))
         except OSError as exc:
-            QMessageBox.critical(self, "Delete Failed", f"Could not delete: {exc}")
-            return
-        self.refresh_library()
-        self._main_window.on_status_update("Universe deleted.")
+            QMessageBox.critical(self, tr("error"), f"{exc}")
 
     @Slot(str)
     def _on_card_export_requested(self, db_path: str) -> None:
         """Save-dialog then start ImportExportWorker in export mode."""
         dest_path, _ = QFileDialog.getSaveFileName(
             self,
-            "Export Universe",
+            tr("export"),
             str(Path.home() / "universe.airpg"),
             "AIRPG Universe (*.airpg)",
         )
@@ -331,7 +344,7 @@ class HubView(QWidget):
             dest_path=dest_path,
         )
         self._export_worker.export_complete.connect(
-            lambda path: QMessageBox.information(self, "Export Complete", f"Saved to:\n{path}")
+            lambda path: QMessageBox.information(self, tr("export_complete"), tr("save_to") + ":\n" + path)
         )
         self._export_worker.error_occurred.connect(self._on_worker_error)
         self._export_worker.status_update.connect(self._main_window.on_status_update)
@@ -343,7 +356,7 @@ class HubView(QWidget):
         if hasattr(self, "_progress_dialog"):
             self._progress_dialog.close()
         self.refresh_library()
-        self._main_window.on_status_update("Universe imported successfully.")
+        self._main_window.on_status_update(tr("ready"))
 
     @Slot(int, int)
     def _on_import_progress(self, current: int, total: int) -> None:
@@ -356,7 +369,7 @@ class HubView(QWidget):
         """Show error and close progress dialog if open."""
         if hasattr(self, "_progress_dialog"):
             self._progress_dialog.close()
-        QMessageBox.critical(self, "Error", message)
+        QMessageBox.critical(self, tr("error"), message)
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -380,13 +393,9 @@ class HubView(QWidget):
             provision_blank_universe(db_path, name)
             return db_path
         except Exception as exc:
-            QMessageBox.critical(self, "Error", f"Could not create universe: {exc}")
+            QMessageBox.critical(self, tr("error"), f"{exc}")
             return None
 
-
-# ---------------------------------------------------------------------------
-# Session Manager Dialog (replaces _SaveSelectDialog from Phase 3)
-# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Session Lobby Dialog (Phase 11.4)
@@ -406,7 +415,7 @@ class SessionLobbyDialog(QDialog):
 
     def __init__(self, db_path: str, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Universe Lobby")
+        self.setWindowTitle(tr("session_lobby"))
         self.setMinimumWidth(550)
         self.setMinimumHeight(600)
         self._db_path = db_path
@@ -418,6 +427,7 @@ class SessionLobbyDialog(QDialog):
         # Asynchronous Workers
         self._saves_worker = DbWorker(db_path)
         self._saves_worker.saves_loaded.connect(self._on_saves_loaded)
+        self._saves_worker.save_complete.connect(self._saves_worker.load_saves_async)
         self._saves_worker.load_saves_async()
 
         self._lobby_worker = DbWorker(db_path)
@@ -427,7 +437,7 @@ class SessionLobbyDialog(QDialog):
 
         # Asynchronous GLOBAL Persona Load
         self._global_worker = DbWorker(str(GLOBAL_DB_FILE))
-        self._global_worker.personas_loaded.connect(self._on_personas_loaded)
+        self._global_worker.personas_loaded.connect(self._persona_combo_populate)
         self._global_worker.load_global_personas()
 
     # ------------------------------------------------------------------
@@ -451,41 +461,41 @@ class SessionLobbyDialog(QDialog):
         # Tab 1: Session Management
         session_tab = QWidget()
         self._setup_session_tab(session_tab)
-        self._tabs.addTab(session_tab, "Game Session")
+        self._tabs.addTab(session_tab, tr("play"))
 
         # Tab 2: Player Lobby
         lobby_tab = QWidget()
         self._setup_lobby_tab(lobby_tab)
-        self._tabs.addTab(lobby_tab, "Player Lobby")
+        self._tabs.addTab(lobby_tab, "Lobby")
 
         layout.addWidget(self._tabs)
 
         # Bottom Buttons
         btns = QHBoxLayout()
-        self._play_btn = QPushButton("Launch Session")
-        self._play_btn.setFixedHeight(40)
-        self._play_btn.setStyleSheet("font-weight: bold; background-color: #2E7D32;")
-        self._play_btn.clicked.connect(self._on_launch_clicked)
+        self._launch_btn = QPushButton(tr("launch_session"))
+        self._launch_btn.setFixedHeight(40)
+        self._launch_btn.setStyleSheet("font-weight: bold; background-color: #2E7D32;")
+        self._launch_btn.clicked.connect(self._on_launch_clicked)
         
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setFixedHeight(40)
-        cancel_btn.clicked.connect(self.reject)
+        self._cancel_btn = QPushButton(tr("cancel"))
+        self._cancel_btn.setFixedHeight(40)
+        self._cancel_btn.clicked.connect(self.reject)
         
-        btns.addWidget(cancel_btn)
-        btns.addWidget(self._play_btn)
+        btns.addWidget(self._cancel_btn)
+        btns.addWidget(self._launch_btn)
         layout.addLayout(btns)
 
     def _setup_session_tab(self, widget: QWidget) -> None:
         layout = QVBoxLayout(widget)
         
         # Existing saves
-        self._existing_group = QGroupBox("Resume a Save")
+        self._existing_group = QGroupBox(tr("resume_save"))
         existing_layout = QVBoxLayout(self._existing_group)
         self._saves_list = QListWidget()
         existing_layout.addWidget(self._saves_list)
         
         save_btns = QHBoxLayout()
-        self._delete_save_btn = QPushButton("Delete Save")
+        self._delete_save_btn = QPushButton(tr("delete_save"))
         self._delete_save_btn.setStyleSheet("color: #FF4B4B;")
         self._delete_save_btn.clicked.connect(self._on_delete_save_clicked)
         save_btns.addStretch()
@@ -494,25 +504,25 @@ class SessionLobbyDialog(QDialog):
         layout.addWidget(self._existing_group)
 
         # New game
-        new_group = QGroupBox("New Game")
-        new_form = QFormLayout(new_group)
-        self._new_player_name = QLineEdit("Hero")
-        new_form.addRow("Save Name:", self._new_player_name)
+        self._new_game_group = QGroupBox(tr("new_universe"))
+        new_form = QFormLayout(self._new_game_group)
+        self._new_player_name = QLineEdit(tr("hero"))
+        new_form.addRow(tr("save_name"), self._new_player_name)
         
         self._difficulty_combo = QComboBox()
         self._difficulty_combo.addItems(["Normal", "Hardcore"])
-        new_form.addRow("Difficulty:", self._difficulty_combo)
+        new_form.addRow(tr("difficulty"), self._difficulty_combo)
 
         self._persona_combo = QComboBox()
-        new_form.addRow("Persona Template:", self._persona_combo)
+        new_form.addRow(tr("persona_template"), self._persona_combo)
         self._persona_edit = QPlainTextEdit()
         self._persona_edit.setFixedHeight(80)
-        new_form.addRow("Custom Persona:", self._persona_edit)
+        new_form.addRow(tr("custom_persona"), self._persona_edit)
         
-        self._create_save_btn = QPushButton("Create New Save")
+        self._create_save_btn = QPushButton(tr("create_save"))
         self._create_save_btn.clicked.connect(self._on_new_game_clicked)
         
-        layout.addWidget(new_group)
+        layout.addWidget(self._new_game_group)
         layout.addWidget(self._create_save_btn)
         layout.addStretch()
 
@@ -521,20 +531,17 @@ class SessionLobbyDialog(QDialog):
     def _setup_lobby_tab(self, widget: QWidget) -> None:
         layout = QVBoxLayout(widget)
         
-        info = QLabel(
-            "Manage player characters available in this universe.\n"
-            "You can add multiple players for a multiplayer session."
-        )
-        info.setWordWrap(True)
-        info.setStyleSheet("color: gray; font-style: italic;")
-        layout.addWidget(info)
+        self._lobby_info = QLabel(tr("player_lobby_info"))
+        self._lobby_info.setWordWrap(True)
+        self._lobby_info.setStyleSheet("color: gray; font-style: italic;")
+        layout.addWidget(self._lobby_info)
 
         self._player_list = QListWidget()
         layout.addWidget(self._player_list)
 
         actions = QHBoxLayout()
-        self._add_player_btn = QPushButton("Create New Player Entity")
-        self._delete_player_btn = QPushButton("Delete Player")
+        self._add_player_btn = QPushButton(tr("create_player_entity"))
+        self._delete_player_btn = QPushButton(tr("delete"))
         self._delete_player_btn.setStyleSheet("color: #FF4B4B;")
         
         actions.addWidget(self._add_player_btn)
@@ -574,10 +581,10 @@ class SessionLobbyDialog(QDialog):
             self._player_list.addItem(item)
 
     @Slot(list)
-    def _on_personas_loaded(self, personas: list[dict]) -> None:
+    def _persona_combo_populate(self, personas: list[dict]) -> None:
         self._persona_combo.blockSignals(True)
         self._persona_combo.clear()
-        self._persona_combo.addItem("-- Custom --", None)
+        self._persona_combo.addItem(f"-- {tr('ready')} --", None) # Generic "-- Custom --"
         for p in personas:
             self._persona_combo.addItem(p["name"], p)
         self._persona_combo.blockSignals(False)
@@ -588,7 +595,7 @@ class SessionLobbyDialog(QDialog):
             self._persona_edit.setPlainText(p.get("description", ""))
 
     def _on_add_player_clicked(self) -> None:
-        name, ok = QInputDialog.getText(self, "New Player", "Character Name:")
+        name, ok = QInputDialog.getText(self, tr("new_player"), tr("character_name"))
         if ok and name.strip():
             self._lobby_worker.create_player_entity(name.strip())
 
@@ -596,7 +603,12 @@ class SessionLobbyDialog(QDialog):
         item = self._player_list.currentItem()
         if not item: return
         eid = item.data(Qt.UserRole)
-        reply = QMessageBox.warning(self, "Confirm", f"Delete player entity '{eid}'?", QMessageBox.Yes | QMessageBox.No)
+        reply = QMessageBox.warning(
+            self, 
+            tr("warning"), 
+            tr("confirm_delete"), 
+            QMessageBox.Yes | QMessageBox.No
+        )
         if reply == QMessageBox.Yes:
             self._lobby_worker.delete_entity(eid)
 
@@ -604,7 +616,12 @@ class SessionLobbyDialog(QDialog):
         item = self._saves_list.currentItem()
         if not item: return
         save = item.data(Qt.UserRole)
-        reply = QMessageBox.warning(self, "Confirm", f"Delete save '{save['player_name']}'?", QMessageBox.Yes | QMessageBox.No)
+        reply = QMessageBox.warning(
+            self, 
+            tr("warning"), 
+            tr("confirm_delete"), 
+            QMessageBox.Yes | QMessageBox.No
+        )
         if reply == QMessageBox.Yes:
             self._saves_worker.delete_save(save["save_id"])
 

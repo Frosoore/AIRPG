@@ -26,12 +26,16 @@ QWidget {
     background-color: #1e1e2e;
     color: #cdd6f4;
     font-size: 11pt;
-    font-family: "Segoe UI", "Ubuntu", sans-serif;
+    font-family: sans-serif;
 }
 
 /* ── Main window / frames ───────────────────────────────────── */
 QMainWindow, QDialog {
     background-color: #1e1e2e;
+}
+
+QLabel {
+    background: transparent;
 }
 
 QFrame[frameShape="5"],
@@ -317,9 +321,16 @@ def main() -> None:
     logger.info("Application starting...")
 
     app = QApplication(sys.argv)
+    app.setStyle("Fusion")
     app.setApplicationName("AIRPG")
-    app.setOrganizationName("AIRPG")
     app.setApplicationDisplayName("AIRPG — AI Role Playing Game")
+
+    # Set Window Icon
+    from PySide6.QtGui import QIcon
+    icon_path = Path(__file__).parent / "assets" / "icon.svg"
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
+
     app.setStyleSheet(_DARK_QSS)
 
     window = MainWindow()

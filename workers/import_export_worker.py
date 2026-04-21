@@ -150,19 +150,19 @@ class ImportExportWorker(QThread):
         all_variants = [first_mes] if first_mes else []
         if isinstance(alt_greetings, list):
             for alt in alt_greetings:
-                if alt and alt.strip():
+                if isinstance(alt, str) and alt.strip():
                     all_variants.append(alt.strip())
+                elif isinstance(alt, dict) and alt.get("message"):
+                    all_variants.append(alt["message"].strip())
         
-        if all_variants:
-            first_msg_payload = json.dumps({"active": 0, "variants": all_variants})
-        else:
-            first_msg_payload = ""
+        # Use AIRPG separator for multiverse first message
+        first_msg_meta = "\n\n---VARIANT---\n\n".join(all_variants) if all_variants else ""
 
         meta = {
             "universe_name": name,
             "system_prompt": system_prompt,
             "global_lore": composite_lore,
-            "first_message": first_msg_payload
+            "first_message": first_msg_meta
         }
         
         entities = [{
@@ -224,8 +224,9 @@ class ImportExportWorker(QThread):
                 conn.execute("PRAGMA foreign_keys=ON;")
                 
                 # Fulfill Phase 10 & 11 Directive: Inject Event directly into Event_Log
-                if first_msg_payload:
+                if all_variants:
                     import uuid
+                    import random
                     from datetime import datetime
                     
                     default_save_id = str(uuid.uuid4())
@@ -234,10 +235,18 @@ class ImportExportWorker(QThread):
                         "VALUES (?, ?, ?, ?, ?);",
                         (default_save_id, "Player", "Normal", datetime.now().isoformat(), "")
                     )
+                    
+                    # Create structured multiverse payload
+                    active_idx = random.randint(0, len(all_variants) - 1)
+                    event_payload = {
+                        "active": active_idx,
+                        "variants": all_variants
+                    }
+                    
                     conn.execute(
                         "INSERT INTO Event_Log (save_id, turn_id, event_type, target_entity, payload) "
                         "VALUES (?, ?, ?, ?, ?);",
-                        (default_save_id, 1, "narrative_text", entities[0]["entity_id"], first_msg_payload)
+                        (default_save_id, 0, "narrative_text", entities[0]["entity_id"], json.dumps(event_payload))
                     )
 
                 conn.commit()

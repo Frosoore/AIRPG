@@ -85,14 +85,14 @@ def read_universe_card_metadata(db_path: str) -> tuple[str, str, str]:
                 "SELECT value FROM Universe_Meta WHERE key = 'universe_name';"
             ).fetchone()
             if row:
-                name = row["value"]
+                name = str(row["value"]).strip()
             row = conn.execute(
                 "SELECT player_name, difficulty, last_updated FROM Saves "
                 "ORDER BY last_updated DESC LIMIT 1;"
             ).fetchone()
             if row:
-                last_updated = str(row["last_updated"])[:10]
-                difficulty = str(row["difficulty"])
+                last_updated = str(row["last_updated"])[:10].strip()
+                difficulty = str(row["difficulty"]).strip()
     except (sqlite3.Error, FileNotFoundError):
         pass
     return name, last_updated, difficulty

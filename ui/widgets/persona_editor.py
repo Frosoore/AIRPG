@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from core.localization import tr
 
 class PersonaEditorWidget(QWidget):
     """Visual editor for defining player personas."""
@@ -41,27 +42,36 @@ class PersonaEditorWidget(QWidget):
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         self._list = QListWidget()
-        left_layout.addWidget(QLabel("<b>Personas</b>"))
+        self._header = QLabel(f"<b>{tr('persona_template').replace(':', '')}</b>")
+        left_layout.addWidget(self._header)
         left_layout.addWidget(self._list)
 
         btn_row = QHBoxLayout()
-        add_btn = QPushButton("+ Add")
-        del_btn = QPushButton("- Delete")
-        btn_row.addWidget(add_btn)
-        btn_row.addWidget(del_btn)
+        self._add_btn = QPushButton(tr("add"))
+        self._del_btn = QPushButton(tr("delete"))
+        btn_row.addWidget(self._add_btn)
+        btn_row.addWidget(self._del_btn)
         left_layout.addLayout(btn_row)
 
         # Right: Editor Form
         self._form = QWidget()
         form_layout = QVBoxLayout(self._form)
         self._name_edit = QLineEdit()
-        self._name_edit.setPlaceholderText("Persona Name (e.g. The Mercenary)")
+        self._name_edit.setPlaceholderText(tr("name"))
         self._desc_edit = QPlainTextEdit()
-        self._desc_edit.setPlaceholderText("Persona Description / Background...")
+        self._desc_edit.setPlaceholderText(tr("description"))
 
-        form_layout.addWidget(QLabel("Name:"))
+        # Use localized colon
+        from core.config import load_config
+        lang = getattr(load_config(), "language", "en")
+        colon = "：" if lang in ("zh", "ja") else ":"
+        if lang == "fr": colon = " :"
+        
+        self._name_label = QLabel(tr("name") + colon)
+        self._desc_label = QLabel(tr("description") + colon)
+        form_layout.addWidget(self._name_label)
         form_layout.addWidget(self._name_edit)
-        form_layout.addWidget(QLabel("Description:"))
+        form_layout.addWidget(self._desc_label)
         form_layout.addWidget(self._desc_edit)
         form_layout.addStretch()
 
@@ -74,10 +84,28 @@ class PersonaEditorWidget(QWidget):
 
         # Connections
         self._list.currentRowChanged.connect(self._on_selection_changed)
-        add_btn.clicked.connect(self._on_add_clicked)
-        del_btn.clicked.connect(self._on_delete_clicked)
+        self._add_btn.clicked.connect(self._on_add_clicked)
+        self._del_btn.clicked.connect(self._on_delete_clicked)
         self._name_edit.textChanged.connect(self._on_form_changed)
         self._desc_edit.textChanged.connect(self._on_form_changed)
+
+    def retranslate_ui(self) -> None:
+        """Refresh all UI text."""
+        self._header.setText(f"<b>{tr('persona_template').replace(':', '')}</b>")
+        self._add_btn.setText(tr("add"))
+        self._del_btn.setText(tr("delete"))
+        
+        # Use localized colon
+        from core.config import load_config
+        lang = getattr(load_config(), "language", "en")
+        colon = "：" if lang in ("zh", "ja") else ":"
+        if lang == "fr": colon = " :"
+        
+        self._name_label.setText(tr("name") + colon)
+        self._desc_label.setText(tr("description") + colon)
+        
+        self._name_edit.setPlaceholderText(tr("name"))
+        self._desc_edit.setPlaceholderText(tr("description"))
 
     def populate(self, personas: list[dict]) -> None:
         """Replace internal list and refresh the UI."""
@@ -134,7 +162,8 @@ class PersonaEditorWidget(QWidget):
 
     @Slot()
     def _on_add_clicked(self) -> None:
-        p = {"persona_id": str(uuid.uuid4()), "name": "New Persona", "description": ""}
+        default_name = tr("persona_template").replace(":", "").upper()
+        p = {"persona_id": str(uuid.uuid4()), "name": default_name, "description": ""}
         self._personas.append(p)
         self._refresh_list()
         self._list.setCurrentRow(len(self._personas) - 1)

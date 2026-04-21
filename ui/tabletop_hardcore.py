@@ -21,6 +21,7 @@ from PySide6.QtWidgets import QMessageBox
 
 from workers.db_helpers import load_saves
 from workers.hardcore_worker import HardcoreWorker
+from core.localization import tr
 
 
 class HardcoreMixin:
@@ -58,29 +59,16 @@ class HardcoreMixin:
         self._chat.set_send_enabled(False)
         reply = QMessageBox.critical(
             self,
-            "You Died",
-            "<b>You have fallen.</b><br><br>"
-            "This is <b>Hardcore mode</b>. Your save will now be "
-            "<b>permanently and irrevocably deleted</b>.<br><br>"
-            "There is no coming back.",
+            tr("death_title"),
+            tr("death_text"),
             QMessageBox.Ok,
         )
         if reply == QMessageBox.Ok:
             self._start_hardcore_deletion()
 
     def _start_hardcore_deletion(self) -> None:
-        """Safely release all connections and start HardcoreWorker.
-
-        CRITICAL SEQUENCE (must run on the main thread):
-          1. Stop all running workers (quit + wait).
-          2. Set all backend references to None - allows Python GC to close
-             sqlite3.Connection objects held by EventSourcer/ModifierProcessor.
-          3. Call gc.collect() to force immediate finalisation of those objects,
-             releasing OS-level SQLite file locks.
-          4. Instantiate HardcoreWorker with paths only (no live objects) and
-             start it on a background thread.
-        """
-        self._main_window.on_status_update("Releasing connections...")
+        """Safely release all connections and start HardcoreWorker."""
+        self._main_window.on_status_update(tr("releasing_connections"))
 
         # Step 1: Stop all running workers
         for worker in [
@@ -99,13 +87,13 @@ class HardcoreMixin:
         self._llm = None
         self._vector_memory = None
 
-        # Step 3: Force GC - finalises EventSourcer/ModifierProcessor and
-        # their internal sqlite3.Connection objects, releasing file handles
+        # Step 3: Force GC
         gc.collect()
 
-        # Step 4: Start HardcoreWorker (paths only - no live Python objects)
+        # Step 4: Start HardcoreWorker
+        from core.paths import VECTOR_DIR
         vector_persist_dir = str(
-            Path.home() / "AIRPG" / "vector" / self._save_id
+            VECTOR_DIR / self._save_id
         )
         self._hardcore_worker = HardcoreWorker(
             db_path=self._db_path,
@@ -129,9 +117,8 @@ class HardcoreMixin:
         """Navigate to Hub after successful deletion."""
         QMessageBox.information(
             self,
-            "Save Deleted",
-            "Your Hardcore save has been <b>permanently erased</b>.<br><br>"
-            "There is no coming back.",
+            tr("save_deleted_title"),
+            tr("save_deleted_text"),
         )
         self._main_window.show_hub()
 
@@ -140,9 +127,9 @@ class HardcoreMixin:
         """Show deletion failure and re-enable navigation."""
         QMessageBox.critical(
             self,
-            "Deletion Failed",
-            f"<b>Could not delete the Hardcore save:</b><br><br>{reason}",
+            tr("deletion_failed_title"),
+            tr("deletion_failed_text", reason=reason),
         )
         self._main_window.on_status_update(
-            "Hardcore deletion failed - see error."
+            tr("error") # Generic fallback
         )

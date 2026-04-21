@@ -2,19 +2,16 @@
 ui/creator_studio_view.py
 
 Creator Studio screen for AIRPG.
-
-Provides a visual interface for building universe content (entities, rules,
-lore settings, and the Lore Book) without exposing raw JSON to the creator.
-
-THREADING RULE: All SQLite writes are delegated to DbWorker.
-No database I/O happens on the main thread.
+Provides a spreadsheet-like interface for building universe content.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from pathlib import Path
 
 from PySide6.QtCore import Qt, Slot
+from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
@@ -35,19 +32,15 @@ from ui.widgets.rule_editor import RuleEditorWidget
 from ui.widgets.stat_definition_editor import StatDefinitionEditorWidget
 from ui.widgets.scheduled_events_editor import ScheduledEventsEditorWidget
 from workers.db_worker import DbWorker
-from core.config import load_config, build_llm_from_config
+from core.config import load_config
+from core.localization import tr
 
 if TYPE_CHECKING:
     from ui.main_window import MainWindow
 
 
 class CreatorStudioView(QWidget):
-    """The universe builder screen.
-
-    Args:
-        main_window: Reference to MainWindow for navigation calls.
-        parent:      Optional Qt parent widget.
-    """
+    """The universe builder screen."""
 
     def __init__(self, main_window: "MainWindow", parent=None) -> None:
         super().__init__(parent)
@@ -55,28 +48,30 @@ class CreatorStudioView(QWidget):
         self._db_path: str | None = None
         self._db_worker: DbWorker | None = None
         self._save_worker: DbWorker | None = None
-        self._populate_after_save: bool = False
+        
+        # Pending AI operations (Chain: Save -> AI Task)
+        self._pending_ai_task: str | None = None # "entities" or "lore"
+        self._pending_ai_mode: str = "auto"
+        self._pending_ai_text: str | None = None
 
         self._setup_ui()
-
-    # ------------------------------------------------------------------
-    # Setup
-    # ------------------------------------------------------------------
+        self._setup_shortcuts()
 
     def _setup_ui(self) -> None:
-        """Build the studio layout with tabs for entities and rules."""
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
 
         # Header
         header = QHBoxLayout()
-        self._universe_label = QLabel("Creator Studio")
+        self._universe_label = QLabel(tr("creator_studio"))
         self._universe_label.setStyleSheet("font-size: 24px; font-weight: bold;")
         header.addWidget(self._universe_label)
         header.addStretch()
 
-        self._save_btn = QPushButton("Save Changes")
-        self._back_btn = QPushButton("Back to Hub")
+        self._save_btn = QPushButton(f"{tr('save_changes')} (Ctrl+S)")
+        self._save_btn.setToolTip("Commit all changes across all tabs to the database.")
+        self._back_btn = QPushButton(tr("hub"))
+        self._back_btn.setToolTip("Return to the universe selection screen.")
         header.addWidget(self._save_btn)
         header.addWidget(self._back_btn)
         layout.addLayout(header)
@@ -89,88 +84,80 @@ class CreatorStudioView(QWidget):
         self._lore_book_editor = LoreBookEditorWidget()
         self._scheduled_events_editor = ScheduledEventsEditorWidget()
         
-        self._tabs.addTab(self._build_lore_tab(), "Lore & Settings")
-        self._tabs.addTab(self._stat_editor, "Stats")
-        self._tabs.addTab(self._entity_editor, "Entities")
-        self._tabs.addTab(self._rule_editor, "Rules")
-        self._tabs.addTab(self._scheduled_events_editor, "Scheduled Events")
-        self._tabs.addTab(self._lore_book_editor, "Lore Book")
+        self._tabs.addTab(self._build_lore_tab(), tr("tab_meta"))
+        self._tabs.addTab(self._stat_editor, tr("stats"))
+        self._tabs.addTab(self._entity_editor, tr("tab_entities"))
+        self._tabs.addTab(self._rule_editor, tr("tab_rules"))
+        self._tabs.addTab(self._scheduled_events_editor, tr("tab_events"))
+        self._tabs.addTab(self._lore_book_editor, tr("tab_lore"))
         layout.addWidget(self._tabs)
 
         # Connections
         self._tabs.currentChanged.connect(self._on_tab_changed)
         self._save_btn.clicked.connect(self._on_save_clicked)
         self._back_btn.clicked.connect(self._on_back_clicked)
-        self._entity_editor.populate_requested.connect(self._on_populate_requested)
+        
+        self._entity_editor.populate_requested.connect(self._on_pop_entities_req)
+        self._lore_book_editor.populate_requested.connect(self._on_pop_lore_req)
+
+    def _setup_shortcuts(self) -> None:
+        self._save_shortcut = QShortcut(QKeySequence("Ctrl+S"), self)
+        self._save_shortcut.activated.connect(self._on_save_clicked)
 
     def _build_lore_tab(self) -> QWidget:
-        """Build the 'Lore & Settings' tab widget."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
-        lore_group = QGroupBox("Global World Lore")
-        lore_layout = QVBoxLayout(lore_group)
+        self._lore_group = QGroupBox(tr("world_lore"))
+        lore_layout = QVBoxLayout(self._lore_group)
         self._lore_edit = QPlainTextEdit()
-        self._lore_edit.setPlaceholderText(
-            "Foundational context for the LLM.  Describe the world's geography, "
-            "history, and core themes here."
-        )
+        self._lore_edit.setPlaceholderText(tr("global_lore_placeholder"))
         lore_layout.addWidget(self._lore_edit)
-        layout.addWidget(lore_group)
+        layout.addWidget(self._lore_group)
 
-        prompt_group = QGroupBox("System Prompt Override")
-        prompt_layout = QVBoxLayout(prompt_group)
+        self._prompt_group = QGroupBox(tr("sys_prompt_override"))
+        prompt_layout = QVBoxLayout(self._prompt_group)
         self._system_prompt_edit = QPlainTextEdit()
-        self._system_prompt_edit.setPlaceholderText(
-            "e.g. You are the narrator of a gritty dark-fantasy world..."
-        )
+        self._system_prompt_edit.setPlaceholderText(tr("system_prompt_placeholder"))
         self._system_prompt_edit.setMinimumHeight(80)
         prompt_layout.addWidget(self._system_prompt_edit)
-        layout.addWidget(prompt_group)
+        layout.addWidget(self._prompt_group)
 
-        # Phase 7: First Message option
-        first_msg_group = QGroupBox("Initial Narrative (First Message)")
-        first_msg_layout = QVBoxLayout(first_msg_group)
+        self._first_msg_group = QGroupBox(tr("init_narrative"))
+        first_msg_layout = QVBoxLayout(self._first_msg_group)
         self._first_message_edit = QPlainTextEdit()
-        self._first_message_edit.setPlaceholderText(
-            "The very first text the player sees when starting a new game in this universe...\n\n"
-            "Separate multiple variants with ---VARIANT---"
-        )
+        self._first_message_edit.setPlaceholderText(tr("first_msg_placeholder"))
         self._first_message_edit.setMinimumHeight(80)
         first_msg_layout.addWidget(self._first_message_edit)
-        layout.addWidget(first_msg_group)
+        layout.addWidget(self._first_msg_group)
 
-        tension_group = QGroupBox("World Tension Level")
-        tension_form = QFormLayout(tension_group)
+        self._tension_group = QGroupBox(tr("world_tension_level"))
+        tension_form = QFormLayout(self._tension_group)
         self._tension_spin = QDoubleSpinBox()
         self._tension_spin.setRange(0.0, 1.0)
         self._tension_spin.setSingleStep(0.05)
-        self._tension_spin.setToolTip(
-            "0.0 = mundane world (trade, politics). "
-            "1.0 = high tension (assassinations, wars, cataclysms)."
-        )
-        tension_form.addRow("Tension (0.0-1.0):", self._tension_spin)
+        self._tension_label_row = QLabel(f"{tr('tension')} (0.0-1.0):")
+        tension_form.addRow(self._tension_label_row, self._tension_spin)
         
         self._temp_spin = QDoubleSpinBox()
         self._temp_spin.setRange(0.0, 1.0)
         self._temp_spin.setSingleStep(0.05)
-        self._temp_spin.setToolTip("LLM Temperature (0.0 = deterministic, 1.0 = creative)")
-        tension_form.addRow("LLM Temperature:", self._temp_spin)
+        self._temp_label_row = QLabel("LLM Temperature:")
+        tension_form.addRow(self._temp_label_row, self._temp_spin)
         
         self._top_p_spin = QDoubleSpinBox()
         self._top_p_spin.setRange(0.0, 1.0)
         self._top_p_spin.setSingleStep(0.05)
-        self._top_p_spin.setToolTip("LLM Top P (Nucleus Sampling)")
-        tension_form.addRow("LLM Top P:", self._top_p_spin)
+        self._top_p_label_row = QLabel("LLM Top P:")
+        tension_form.addRow(self._top_p_label_row, self._top_p_spin)
 
         from PySide6.QtWidgets import QComboBox
         self._verbosity_combo = QComboBox()
-        self._verbosity_combo.addItems(["Short", "Balanced", "Talkative"])
-        self._verbosity_combo.setToolTip("Controls how detailed the AI's narrative responses will be.")
-        tension_form.addRow("Default Verbosity:", self._verbosity_combo)
+        self._verbosity_combo.addItems([tr("short"), tr("balanced"), tr("talkative")])
+        self._verbosity_label_row = QLabel(f"{tr('verbosity')}:")
+        tension_form.addRow(self._verbosity_label_row, self._verbosity_combo)
 
-        layout.addWidget(tension_group)
-
+        layout.addWidget(self._tension_group)
         layout.addStretch()
         return tab
 
@@ -178,167 +165,145 @@ class CreatorStudioView(QWidget):
     # Public API
     # ------------------------------------------------------------------
 
-    def load_universe(self, db_path: str) -> None:
-        """Load all data for the given universe into the editors.
+    def retranslate_ui(self) -> None:
+        self._universe_label.setText(tr("creator_studio"))
+        self._save_btn.setText(f"{tr('save_changes')} (Ctrl+S)")
+        self._back_btn.setText(tr("hub"))
+        self._tabs.setTabText(0, tr("tab_meta"))
+        self._tabs.setTabText(1, tr("stats"))
+        self._tabs.setTabText(2, tr("tab_entities"))
+        self._tabs.setTabText(3, tr("tab_rules"))
+        self._tabs.setTabText(4, tr("tab_events"))
+        self._tabs.setTabText(5, tr("tab_lore"))
 
-        Uses DbWorker.load_full_universe to fetch entities, rules, lore book,
-        and meta in a single pass, ensuring UI synchronization and preventing
-        task-overwriting bugs.
-        """
+        self._lore_group.setTitle(tr("world_lore"))
+        self._prompt_group.setTitle(tr("sys_prompt_override"))
+        self._first_msg_group.setTitle(tr("init_narrative"))
+        self._tension_group.setTitle(tr("world_tension_level"))
+        self._tension_label_row.setText(f"{tr('tension')} (0.0-1.0):")
+        self._temp_label_row.setText(tr("llm_temp"))
+        self._top_p_label_row.setText(tr("llm_top_p"))
+        self._verbosity_label_row.setText(f"{tr('verbosity')}:")
+
+        self._entity_editor.retranslate_ui()
+        self._rule_editor.retranslate_ui()
+        self._stat_editor.retranslate_ui()
+        self._lore_book_editor.retranslate_ui()
+        self._scheduled_events_editor.retranslate_ui()
+
+    def load_universe(self, db_path: str) -> None:
         self._db_path = db_path
         self._db_worker = DbWorker(db_path)
-        self._db_worker.entities_loaded.connect(self._entity_editor.populate)
-        self._db_worker.entities_loaded.connect(lambda _: self._entity_editor.set_populate_enabled(True))
-        self._db_worker.rules_loaded.connect(self._rule_editor.populate)
-        self._db_worker.stat_definitions_loaded.connect(self._stat_editor.populate)
-        self._db_worker.stat_definitions_loaded.connect(self._entity_editor.set_stat_definitions)
-        self._db_worker.lore_book_loaded.connect(self._lore_book_editor.populate)
-        self._db_worker.scheduled_events_loaded.connect(self._scheduled_events_editor.set_events)
-        self._db_worker.universe_meta_loaded.connect(self._on_meta_loaded)
+        self._db_worker.full_universe_loaded.connect(self._on_full_universe_loaded)
         self._db_worker.error_occurred.connect(self._on_worker_error)
         self._db_worker.status_update.connect(self._main_window.on_status_update)
-
-        # Single atomic load task
         self._db_worker.load_full_universe()
 
     # ------------------------------------------------------------------
     # Slots
     # ------------------------------------------------------------------
 
+    @Slot(dict)
+    def _on_full_universe_loaded(self, data: dict) -> None:
+        sdefs = data.get("stat_definitions", [])
+        self._stat_editor.populate(sdefs)
+        self._entity_editor.populate(data.get("entities", []))
+        self._entity_editor.set_stat_definitions(sdefs)
+        self._rule_editor.populate(data.get("rules", []))
+        self._rule_editor.set_stat_definitions(sdefs)
+        self._lore_book_editor.populate(data.get("lore_book", []))
+        self._scheduled_events_editor.set_events_and_calendar(data.get("scheduled_events", []), data.get("meta", {}))
+        self._on_meta_loaded(data.get("meta", {}))
+
     @Slot(int)
     def _on_tab_changed(self, index: int) -> None:
-        """Sync data between tabs when switching (e.g. Stat definitions)."""
-        if self._tabs.widget(index) == self._entity_editor:
-            # Stats -> Entities sync
-            stat_defs = self._stat_editor.collect_data()
-            self._entity_editor.set_stat_definitions(stat_defs)
+        if index in (2, 3):
+            sdefs = self._stat_editor.collect_data()
+            self._entity_editor.set_stat_definitions(sdefs)
+            self._rule_editor.set_stat_definitions(sdefs)
 
     @Slot()
     def _on_save_clicked(self) -> None:
-        """Collect all tab data and launch ONE atomic DbWorker save task.
+        if not self._db_path: return
 
-        Phase 7: Absolute Persistence Protocol.  Collects data from all four
-        tabs and issues a single save_full_universe call.  The worker is held in
-        self._save_worker to prevent premature GC, and error_occurred is
-        connected to a critical alert dialog.
-        """
-        if not self._db_path:
-            QMessageBox.warning(self, "No Universe", "No universe is currently loaded.")
-            return
-
-        entities = self._entity_editor.collect_data()
-        rules = self._rule_editor.collect_data()
-        stat_definitions = self._stat_editor.collect_data()
-        lore_book = self._lore_book_editor.collect_data()
-        scheduled_events = self._scheduled_events_editor.get_events()
+        events, cal_meta = self._scheduled_events_editor.collect_data()
         
-        fm_text = self._first_message_edit.toPlainText().strip()
-        variants = [v.strip() for v in fm_text.split("---VARIANT---") if v.strip()]
-        import json
-        if variants:
-            fm_payload = json.dumps({"active": 0, "variants": variants})
-        else:
-            fm_payload = ""
-
         meta = {
             "global_lore": self._lore_edit.toPlainText().strip(),
             "system_prompt": self._system_prompt_edit.toPlainText().strip(),
-            "first_message": fm_payload,
+            "first_message": self._first_message_edit.toPlainText().strip(),
             "world_tension_level": str(self._tension_spin.value()),
             "llm_temperature": str(self._temp_spin.value()),
             "llm_top_p": str(self._top_p_spin.value()),
             "llm_verbosity": self._verbosity_combo.currentText().lower(),
+            "calendar_config": cal_meta.get("calendar_config", "{}")
         }
 
-        # Phase 7: Enforced worker persistence and error wiring
+        data = {
+            "meta": meta,
+            "stat_definitions": self._stat_editor.collect_data(),
+            "entities": self._entity_editor.collect_data(),
+            "rules": self._rule_editor.collect_data(),
+            "lore_book": self._lore_book_editor.collect_data(),
+            "scheduled_events": events
+        }
+
         self._save_worker = DbWorker(self._db_path)
         self._save_worker.save_complete.connect(self._on_save_complete)
         self._save_worker.error_occurred.connect(self._on_worker_error)
-        self._save_worker.status_update.connect(self._main_window.on_status_update)
         self._save_worker.save_full_universe(
-            entities, rules, meta, lore_book, stat_definitions, scheduled_events
+            data["entities"], data["rules"], data["meta"], 
+            data["lore_book"], data["stat_definitions"], data["scheduled_events"]
         )
 
     @Slot()
     def _on_save_complete(self) -> None:
-        """Show absolute visual confirmation that the database commit succeeded."""
-        self._main_window.on_status_update("Universe saved successfully.")
+        self._main_window.on_status_update(tr("universe_saved"))
+        if self._pending_ai_task:
+            task = self._pending_ai_task
+            self._pending_ai_task = None
+            if task == "entities":
+                self._db_worker.populate_entities(self._pending_ai_mode, self._pending_ai_text)
+            elif task == "lore":
+                self._db_worker.populate_lore(self._pending_ai_mode, self._pending_ai_text)
+
+    @Slot(str, object)
+    def _on_pop_entities_req(self, mode: str, text: str | None) -> None:
+        self._pending_ai_task = "entities"
+        self._pending_ai_mode = mode
+        self._pending_ai_text = text
+        self._on_save_clicked()
+
+    @Slot(str, object)
+    def _on_pop_lore_req(self, mode: str, text: str | None) -> None:
+        self._pending_ai_task = "lore"
+        self._pending_ai_mode = mode
+        self._pending_ai_text = text
+        self._on_save_clicked()
+
+    def _on_meta_loaded(self, meta: dict) -> None:
+        name = meta.get("universe_name", "Universe")
+        self._universe_label.setText(f"{tr('creator_studio')} - {name}")
+        self._lore_edit.setPlainText(meta.get("global_lore", ""))
+        self._system_prompt_edit.setPlainText(meta.get("system_prompt", ""))
+        self._first_message_edit.setPlainText(meta.get("first_message", ""))
+        self._tension_spin.setValue(float(meta.get("world_tension_level", "0.3")))
+        self._temp_spin.setValue(float(meta.get("llm_temperature", "0.7")))
+        self._top_p_spin.setValue(float(meta.get("llm_top_p", "1.0")))
         
-        # Phase 11: Auto-trigger Populate if it was requested
-        if self._populate_after_save:
-            self._populate_after_save = False
-            if self._db_worker:
-                self._db_worker.populate_entities()
+        v = meta.get("llm_verbosity", "balanced")
+        idx = -1
+        for i in range(self._verbosity_combo.count()):
+            if self._verbosity_combo.itemText(i).lower() == tr(v).lower() or self._verbosity_combo.itemText(i).lower() == v.lower():
+                idx = i
+                break
+        self._verbosity_combo.setCurrentIndex(max(0, idx))
 
     @Slot()
     def _on_back_clicked(self) -> None:
-        """Return to the hub library."""
         self._main_window.show_hub()
-
-    @Slot()
-    def _on_populate_requested(self) -> None:
-        """Chain Save -> Populate sequence to ensure AI sees latest Stats/Lore.
-        
-        Local models read from the DB file. If the user just imported stats
-        but didn't save, the AI prompt would show 'No stats defined'.
-        """
-        if not self._db_path:
-            return
-
-        self._populate_after_save = True
-        self._entity_editor.set_populate_enabled(False)
-        self._main_window.on_status_update("Saving changes before AI generation...")
-        
-        # Trigger the standard save flow
-        self._on_save_clicked()
-
-    @Slot(dict)
-    def _on_meta_loaded(self, meta: dict) -> None:
-        """Update the title label and populate Lore & Settings fields."""
-        name = meta.get("universe_name", "Universe")
-        self._universe_label.setText(f"Creator Studio - {name}")
-
-        self._lore_edit.setPlainText(meta.get("global_lore", ""))
-        self._system_prompt_edit.setPlainText(meta.get("system_prompt", ""))
-        
-        fm_raw = meta.get("first_message", "")
-        fm_text = fm_raw
-        import json
-        try:
-            data = json.loads(fm_raw)
-            if isinstance(data, dict) and "variants" in data:
-                fm_text = "\n\n---VARIANT---\n\n".join(data["variants"])
-        except Exception:
-            pass
-        self._first_message_edit.setPlainText(fm_text)
-        
-        try:
-            tension = float(meta.get("world_tension_level", "0.3"))
-        except ValueError:
-            tension = 0.3
-        self._tension_spin.setValue(max(0.0, min(1.0, tension)))
-        
-        try:
-            temp = float(meta.get("llm_temperature", "0.7"))
-        except ValueError:
-            temp = 0.7
-        self._temp_spin.setValue(max(0.0, min(1.0, temp)))
-        
-        try:
-            top_p = float(meta.get("llm_top_p", "1.0"))
-        except ValueError:
-            top_p = 1.0
-        self._top_p_spin.setValue(max(0.0, min(1.0, top_p)))
-        
-        verbosity = meta.get("llm_verbosity", "balanced").capitalize()
-        idx = self._verbosity_combo.findText(verbosity)
-        self._verbosity_combo.setCurrentIndex(max(0, idx))
-
-        self._main_window.on_status_update("Ready.")
 
     @Slot(str)
     def _on_worker_error(self, message: str) -> None:
-        """Show a critical error dialog and re-enable UI."""
-        self._populate_after_save = False
-        self._entity_editor.set_populate_enabled(True)
-        QMessageBox.critical(self, "Database Error", message)
+        self._pending_ai_task = None
+        QMessageBox.critical(self, tr("error"), message)

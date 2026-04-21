@@ -125,8 +125,8 @@ _TENSION_HIGH_GUIDANCE: str = (
 _TENSION_THRESHOLD: float = 0.5
 
 POPULATE_SYSTEM_PROMPT: str = """\
-You are a deterministic entity extraction engine.
-Your task is to identify unique characters (NPCs) or organized groups (factions) mentioned in the lore.
+You are a deterministic extraction and generation engine.
+Your task is to identify or generate unique characters (NPCs) or organized groups (factions).
 
 CRITICAL RULES:
 1. Respond ONLY with a ~~~json ... ~~~ fenced block.
@@ -139,10 +139,23 @@ CRITICAL RULES:
    If the list is empty, the 'stats' object MUST be empty {}.
 """
 
+POPULATE_LORE_SYSTEM_PROMPT: str = """\
+You are a world-building engine.
+Your task is to expand the lore of a fictional universe based on existing context.
+
+CRITICAL RULES:
+1. Respond ONLY with a ~~~json ... ~~~ fenced block.
+2. DO NOT write any conversational text.
+3. category must be one of: 'General', 'Faction', 'Location', 'Character', 'Magic', or a logical custom category.
+4. Focus on consistency with the existing global lore and themes.
+5. Provide rich, evocative content for each entry.
+"""
+
 def build_populate_prompt(
     lore_chunks: str,
     existing_entities: list[str],
     stat_defs: list[dict] = None,
+    custom_instruction: str | None = None,
 ) -> list[LLMMessage]:
     """Assemble the prompt for the 'Populate' entity generator.
 
@@ -150,6 +163,7 @@ def build_populate_prompt(
         lore_chunks: The text context to analyze for entities.
         existing_entities: List of already defined entity names to skip.
         stat_defs: List of available Stat_Definitions.
+        custom_instruction: Optional user-provided instruction for generation.
 
     Returns:
         list[LLMMessage] for the LLM.
@@ -169,9 +183,13 @@ def build_populate_prompt(
             lines.append(f"- \"{name}\" ({vtype}) : {desc}. Constraints: {params}")
         stats_info = "\n".join(lines)
 
+    task_desc = "Extract NEW unique NPCs or factions from the lore context below."
+    if custom_instruction:
+        task_desc = f"GENERATE new unique NPCs or factions based on this instruction: {custom_instruction}"
+
     user_content = (
         f"{stats_info}\n\n"
-        "TASK: Extract NEW unique NPCs or factions from the lore context below.\n"
+        f"TASK: {task_desc}\n"
         "OUTPUT REQUIREMENT: Respond ONLY with the JSON block. No preamble.\n\n"
         "CRITICAL STATS RULE:\n"
         "1. The 'stats' object MUST ONLY contain exact keys from the AVAILABLE STATS list above.\n"
@@ -183,7 +201,7 @@ def build_populate_prompt(
         "{\n"
         "  \"entities\": [\n"
         "    {\n"
-        "      \"name\": \"<EXTRACTED_NAME_HERE>\",\n"
+        "      \"name\": \"<NAME_HERE>\",\n"
         "      \"entity_type\": \"<npc_OR_faction>\",\n"
         "      \"description\": \"<CONCISE_ROLE_DESCRIPTION>\",\n"
         "      \"stats\": {\n"
@@ -193,11 +211,47 @@ def build_populate_prompt(
         "  ]\n"
         "}\n"
         "~~~\n\n"
-        f"LORE CONTEXT:\n{lore_chunks}\n{skip_list}"
+        f"CONTEXT / LORE:\n{lore_chunks}\n{skip_list}"
     )
 
     return [
         {"role": "system", "content": POPULATE_SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+
+def build_populate_lore_prompt(
+    global_lore: str,
+    existing_entries: list[str],
+    custom_instruction: str | None = None,
+) -> list[LLMMessage]:
+    """Assemble the prompt for the 'Populate' Lore Book generator."""
+    skip_list = ""
+    if existing_entries:
+        skip_list = f"\nALREADY KNOWN LORE ENTRIES (SKIP THESE): {', '.join(existing_entries)}"
+
+    task_desc = "Expand the lore by creating new entries for factions, magic systems, or locations."
+    if custom_instruction:
+        task_desc = f"GENERATE new lore entries based on this instruction: {custom_instruction}"
+
+    user_content = (
+        f"TASK: {task_desc}\n"
+        "OUTPUT REQUIREMENT: Respond ONLY with the JSON block. No preamble.\n\n"
+        "~~~json\n"
+        "{\n"
+        "  \"lore_entries\": [\n"
+        "    {\n"
+        "      \"category\": \"<General|Faction|Location|Character|Magic>\",\n"
+        "      \"name\": \"<ENTRY_NAME_HERE>\",\n"
+        "      \"content\": \"<RICH_DESCRIPTIVE_CONTENT>\"\n"
+        "    }\n"
+        "  ]\n"
+        "}\n"
+        "~~~\n\n"
+        f"EXISTING WORLD LORE:\n{global_lore}\n{skip_list}"
+    )
+
+    return [
+        {"role": "system", "content": POPULATE_LORE_SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
     ]
 

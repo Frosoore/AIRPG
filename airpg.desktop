@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=AIRPG
+Comment=AI-Powered Role Playing Game
+Exec=bash -c "cd $(dirname %k) && ./run.sh"
+Icon=assets/icon.svg
+Terminal=false
+Categories=Game;RolePlaying;
+Keywords=ai;rpg;llm;
