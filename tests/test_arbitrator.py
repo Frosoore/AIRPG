@@ -20,7 +20,7 @@ import pytest
 
 from chromadb import EmbeddingFunction, Documents, Embeddings
 
-from core.arbitrator import Arbitrator, ArbitratorResult
+from core.arbitrator import ArbitratorEngine, ArbitratorResult
 from core.rules_engine import RulesEngine
 from database.event_sourcing import EventSourcer
 from database.modifier_processor import ModifierProcessor
@@ -118,12 +118,12 @@ def _make_arbitrator(
     vm: VectorMemory,
     llm_response: LLMResponse,
     rules: list[dict] | None = None,
-) -> tuple[Arbitrator, _StubLLM]:
+) -> tuple[ArbitratorEngine, _StubLLM]:
     llm = _StubLLM(llm_response)
     es = EventSourcer(db_path)
     mp = ModifierProcessor(db_path)
     re = RulesEngine(rules or [])
-    arb = Arbitrator(
+    arb = ArbitratorEngine(
         llm=llm, event_sourcer=es, modifier_processor=mp,
         rules_engine=re, vector_memory=vm, db_path=db_path,
     )
@@ -283,7 +283,7 @@ class TestCorrectionLoop:
         es = EventSourcer(db_path)
         mp = ModifierProcessor(db_path)
         re = RulesEngine([])
-        arb = Arbitrator(llm=llm1, event_sourcer=es, modifier_processor=mp,
+        arb = ArbitratorEngine(llm=llm1, event_sourcer=es, modifier_processor=mp,
                          rules_engine=re, vector_memory=vm, db_path=db_path)
 
         arb.process_turn("s1", 1, "bad", "sys", [])
@@ -457,8 +457,8 @@ class TestStreamingCallback:
         from database.event_sourcing import EventSourcer
         from database.modifier_processor import ModifierProcessor
         from core.rules_engine import RulesEngine
-        from core.arbitrator import Arbitrator
-        arb = Arbitrator(
+        from core.arbitrator import ArbitratorEngine
+        arb = ArbitratorEngine(
             llm=llm,
             event_sourcer=EventSourcer(db_path),
             modifier_processor=ModifierProcessor(db_path),
@@ -513,8 +513,8 @@ class TestStreamingCallback:
         from database.event_sourcing import EventSourcer
         from database.modifier_processor import ModifierProcessor
         from core.rules_engine import RulesEngine
-        from core.arbitrator import Arbitrator
-        arb_s = Arbitrator(
+        from core.arbitrator import ArbitratorEngine
+        arb_s = ArbitratorEngine(
             llm=llm_s,
             event_sourcer=EventSourcer(db2),
             modifier_processor=ModifierProcessor(db2),
@@ -560,8 +560,8 @@ class TestDynamicStopSequences:
         from database.event_sourcing import EventSourcer
         from database.modifier_processor import ModifierProcessor
         from core.rules_engine import RulesEngine
-        from core.arbitrator import Arbitrator
-        arb = Arbitrator(
+        from core.arbitrator import ArbitratorEngine
+        arb = ArbitratorEngine(
             llm=llm,
             event_sourcer=EventSourcer(db_path),
             modifier_processor=ModifierProcessor(db_path),

@@ -4,7 +4,7 @@ workers/narrative_worker.py
 QThread worker for the Arbitrator narrative turn pipeline.
 
 This is the most critical worker in AIRPG.  It runs the complete
-Arbitrator.process_turn() off the main thread and communicates progress
+ArbitratorEngine.process_turn() off the main thread and communicates progress
 back via signals.
 
 Phase 3 behaviour: emits the full narrative_text as a single token_received
@@ -19,8 +19,9 @@ from __future__ import annotations
 
 from PySide6.QtCore import QThread, Signal
 
-from core.arbitrator import Arbitrator, ArbitratorResult
-from llm_engine.base import LLMConnectionError, LLMMessage
+from core.arbitrator import ArbitratorEngine, ArbitratorResult
+from llm_engine.base import LLMConnectionError, LLMMessage, LLMBackend
+from llm_engine.vector_memory import VectorMemory
 
 
 class NarrativeWorker(QThread):
@@ -32,17 +33,6 @@ class NarrativeWorker(QThread):
         turn_complete(object): The ArbitratorResult dataclass instance.
         error_occurred(str):   Human-readable error string.
         status_update(str):    Short message for QStatusBar.
-
-    Args:
-        arbitrator:              The session's Arbitrator instance.
-        save_id:                 The active save identifier.
-        turn_id:                 The current turn number.
-        user_message:            The player's raw input text.
-        universe_system_prompt:  The universe's system prompt string.
-        history:                 Prior conversation as list[LLMMessage].
-        player_entity_id:        The ID of the player sending the message.
-        temperature:             Sampling temperature (0.0 to 1.0).
-        top_p:                   Nucleus sampling parameter (0.0 to 1.0).
     """
 
     token_received = Signal(str)
@@ -52,47 +42,65 @@ class NarrativeWorker(QThread):
 
     def __init__(
         self,
-        arbitrator: Arbitrator,
+        llm: LLMBackend,
+        arbitrator: ArbitratorEngine,
+        vector_memory: VectorMemory,
         save_id: str,
         turn_id: int,
-        user_message: str,
-        universe_system_prompt: str,
-        history: list[LLMMessage],
-        player_entity_id: str = "player",
+        action: object, # PlayerAction
+        history: list[dict],
+        system_prompt: str,
+        global_lore: str = "",
         temperature: float = 0.7,
         top_p: float = 1.0,
+        verbosity: str = "balanced",
+        current_time: int = 0
     ) -> None:
         super().__init__()
+        self._llm = llm
         self._arbitrator = arbitrator
+        self._vector_memory = vector_memory
         self._save_id = save_id
         self._turn_id = turn_id
-        self._user_message = user_message
-        self._universe_system_prompt = universe_system_prompt
-        self._history = list(history)  # Defensive copy
-        self._player_entity_id = player_entity_id
+        self._action = action
+        self._history = history
+        self._system_prompt = system_prompt
+        self._global_lore = global_lore
         self._temperature = temperature
         self._top_p = top_p
+        self._verbosity = verbosity
+        self._current_time = current_time
 
     def run(self) -> None:
         """Execute the Arbitrator turn pipeline.  Never raises."""
         try:
             self.status_update.emit("Generating narrative…")
+            
+            # Configure arbitrator with injected dependencies
+            self._arbitrator.configure(self._llm, self._vector_memory)
+
+            # Map history format if needed (ChatDisplay format -> LLMMessage format)
+            llm_history = []
+            for h in self._history:
+                if h.get("event_type") == "user_input":
+                    llm_history.append({"role": "user", "content": h.get("payload", "")})
+                elif h.get("event_type") == "narrative_text":
+                    payload = h.get("payload", "")
+                    text = payload.get("variants")[payload.get("active")] if isinstance(payload, dict) else str(payload)
+                    llm_history.append({"role": "assistant", "content": text})
 
             result: ArbitratorResult = self._arbitrator.process_turn(
                 save_id=self._save_id,
                 turn_id=self._turn_id,
-                user_message=self._user_message,
-                universe_system_prompt=self._universe_system_prompt,
-                history=self._history,
-                player_entity_id=self._player_entity_id,
-                # Phase 4: real per-token streaming via Signal/Slot
-                # token_received.emit is thread-safe: Qt queues the call
-                # onto the main thread's event loop automatically
+                user_message=self._action.text,
+                universe_system_prompt=self._system_prompt,
+                history=llm_history,
+                player_entity_id=self._action.player_id,
                 stream_token_callback=self.token_received.emit,
                 temperature=self._temperature,
                 top_p=self._top_p,
+                verbosity_level=self._verbosity,
             )
-            # Tokens were already emitted per-token above — do NOT emit again
 
             self.turn_complete.emit(result)
             self.status_update.emit("Ready.")

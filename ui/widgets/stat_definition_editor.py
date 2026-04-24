@@ -182,6 +182,7 @@ class StatDefinitionEditorWidget(QWidget):
             }
 
         it_id = QTableWidgetItem(stat.get("stat_id", ""))
+        it_id.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_FileDialogDetailedView))
         it_name = QTableWidgetItem(stat.get("name", ""))
         
         vtype = stat.get("value_type", "numeric")

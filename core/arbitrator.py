@@ -1,10 +1,10 @@
 """
 core/arbitrator.py
 
-The Arbitrator — AIRPG's deterministic firewall between LLM creativity and
+The ArbitratorEngine — AIRPG's deterministic firewall between LLM creativity and
 the game's mathematical state.
 
-On every narrative turn the Arbitrator:
+On every narrative turn the ArbitratorEngine:
   1. Fetches current entity stats from State_Cache + applies modifier overlay.
   2. Retrieves relevant narrative memories from VectorMemory (RAG).
   3. Builds the full narrative prompt (injecting any pending correction).
@@ -48,7 +48,7 @@ from workers.db_helpers import get_current_time, get_time_of_day_context
 
 @dataclass
 class ArbitratorResult:
-    """The complete output of one Arbitrator turn.
+    """The complete output of one ArbitratorEngine turn.
 
     Attributes:
         narrative_text:   The prose to display to the player.  Always present.
@@ -72,37 +72,36 @@ class ArbitratorResult:
 
 
 # ---------------------------------------------------------------------------
-# Arbitrator
+# ArbitratorEngine
 # ---------------------------------------------------------------------------
 
-class Arbitrator:
+class ArbitratorEngine:
     """Validates and applies LLM-proposed state changes for one narrative turn.
 
     Args:
-        llm:                The LLM backend to call for narrative generation.
-        event_sourcer:      Handles Event_Log writes and State_Cache reads.
-        modifier_processor: Applies temporary stat modifiers.
-        rules_engine:       Evaluates creator-defined rules against entity stats.
-        vector_memory:      Semantic memory store for RAG retrieval and embedding.
         db_path:            Path to the universe .db for direct entity queries.
+        rules_list:         List of creator-defined rules.
     """
 
     def __init__(
         self,
-        llm: LLMBackend,
-        event_sourcer: EventSourcer,
-        modifier_processor: ModifierProcessor,
-        rules_engine: RulesEngine,
-        vector_memory: VectorMemory,
         db_path: str,
+        rules_list: list[dict],
     ) -> None:
-        self._llm = llm
-        self._event_sourcer = event_sourcer
-        self._modifier_processor = modifier_processor
-        self._rules_engine = rules_engine
-        self._vector_memory = vector_memory
         self._db_path = db_path
+        self._rules_engine = RulesEngine(rules_list)
+        self._event_sourcer = EventSourcer(db_path)
+        self._modifier_processor = ModifierProcessor(db_path)
+        
+        # Dependencies to be injected via configure()
+        self._llm: LLMBackend | None = None
+        self._vector_memory: VectorMemory | None = None
         self._pending_correction: str | None = None
+
+    def configure(self, llm: LLMBackend, vector_memory: VectorMemory) -> None:
+        """Inject runtime dependencies before process_turn."""
+        self._llm = llm
+        self._vector_memory = vector_memory
 
     # ------------------------------------------------------------------
     # Public API
@@ -121,7 +120,7 @@ class Arbitrator:
         top_p: float = 1.0,
         verbosity_level: str = "balanced",
     ) -> ArbitratorResult:
-        """Execute one full Arbitrator turn and return the result.
+        """Execute one full ArbitratorEngine turn and return the result.
 
         Args:
             save_id:                 The active save identifier.

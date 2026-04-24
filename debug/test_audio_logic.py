@@ -8,7 +8,7 @@ from dataclasses import dataclass
 # Add project root to sys.path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from core.arbitrator import Arbitrator, ArbitratorResult
+from core.arbitrator import ArbitratorEngine, ArbitratorResult
 from llm_engine.base import LLMResponse
 
 class TestAudioLogic(unittest.TestCase):

@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.multiplayer_queue import ArbitratorWorker, PlayerAction
+from core.arbitrator import ArbitratorEngine, ArbitratorResult
 
 from ui.checkpoint_dialog import CheckpointDialog
 from ui.constants_sidebar import ConstantsSidebar
@@ -219,6 +220,13 @@ class TabletopView(HardcoreMixin, QWidget):
         self._chat.variant_requested.connect(self._on_variant_requested)
         self._chat.regenerate_requested.connect(self._on_regenerate_requested)
 
+        # Shortcuts
+        from PySide6.QtGui import QShortcut, QKeySequence
+        self._undo_shortcut = QShortcut(QKeySequence("Ctrl+Z"), self)
+        self._undo_shortcut.activated.connect(self._on_rewind_clicked)
+        self._redo_shortcut = QShortcut(QKeySequence("Ctrl+Y"), self)
+        self._redo_shortcut.activated.connect(self._on_rewind_clicked)
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -236,6 +244,7 @@ class TabletopView(HardcoreMixin, QWidget):
         self._verb_label.setText(tr("verbosity"))
         self._verbosity_status_label.setText(tr(self._llm_verbosity).capitalize())
         self._rewind_btn.setText(tr("rewind"))
+        self._rewind_btn.setToolTip(f"{tr('rewind')} (Ctrl+Z)")
         self._hub_btn.setText(tr("hub"))
 
         # Sub-widgets
@@ -494,12 +503,21 @@ class TabletopView(HardcoreMixin, QWidget):
         self._time_label.setText(self._format_time(self._current_time))
 
         # 1. Arbitrator Phase
-        from core.arbitrator import ArbitratorEngine
         rules = load_rules_for_session(self._db_path)
         self._arbitrator = ArbitratorEngine(self._db_path, rules)
 
         player_id = self._player_selector.currentData() or "player_1"
-        action = PlayerAction(player_id, text)
+        action = PlayerAction(
+            player_id=player_id, 
+            text=text,
+            save_id=self._save_id,
+            turn_id=self._turn_id,
+            universe_system_prompt=self._universe_system_prompt,
+            history=self._history,
+            temperature=self._llm_temperature,
+            top_p=self._llm_top_p,
+            verbosity_level=self._llm_verbosity
+        )
 
         from workers.narrative_worker import NarrativeWorker
         self._narrative_worker = NarrativeWorker(
@@ -615,12 +633,21 @@ class TabletopView(HardcoreMixin, QWidget):
 
         # 2. Run a special regenerate worker
         from workers.regenerate_worker import RegenerateWorker
-        from core.arbitrator import ArbitratorEngine
         rules = load_rules_for_session(self._db_path)
         self._arbitrator = ArbitratorEngine(self._db_path, rules)
         
         player_id = self._player_selector.currentData() or "player_1"
-        action = PlayerAction(player_id, user_action_text)
+        action = PlayerAction(
+            player_id=player_id, 
+            text=user_action_text,
+            save_id=self._save_id,
+            turn_id=turn_id,
+            universe_system_prompt=self._universe_system_prompt,
+            history=sub_history,
+            temperature=self._llm_temperature,
+            top_p=self._llm_top_p,
+            verbosity_level=self._llm_verbosity
+        )
 
         # Create sub-history (history UP TO this turn)
         sub_history = []
@@ -630,18 +657,15 @@ class TabletopView(HardcoreMixin, QWidget):
 
         self._regen_worker = RegenerateWorker(
             llm=self._llm,
-            arbitrator=self._arbitrator,
-            vector_memory=self._vector_memory,
+            db_path=self._db_path,
             save_id=self._save_id,
             turn_id=turn_id,
-            action=action,
             history=sub_history,
             system_prompt=self._universe_system_prompt,
-            global_lore=self._global_lore,
-            temperature=self._llm_temperature + 0.1, # Increase entropy for regen
+            user_message=action.text,
+            temperature=self._llm_temperature + 0.1,
             top_p=self._llm_top_p,
-            verbosity=self._llm_verbosity,
-            current_time=self._current_time
+            verbosity_level=self._llm_verbosity
         )
         self._regen_worker.token_received.connect(self._chat.append_token)
         self._regen_worker.turn_complete.connect(self._on_turn_complete)

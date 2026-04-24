@@ -169,6 +169,7 @@ class LoreBookEditorWidget(QWidget):
         
         it_name = QTableWidgetItem(ent.get("name", ""))
         it_name.setData(Qt.UserRole, ent.get("entry_id", uuid.uuid4().hex))
+        it_name.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_FileDialogDetailedView))
         
         it_desc = QTableWidgetItem(ent.get("content", ""))
         

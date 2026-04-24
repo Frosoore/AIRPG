@@ -202,6 +202,7 @@ class RuleEditorWidget(QWidget):
         self._table.insertRow(row)
         
         it_id = QTableWidgetItem(rule.get("rule_id", ""))
+        it_id.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_FileDialogDetailedView))
         it_prio = QTableWidgetItem(str(rule.get("priority", 0)))
         it_target = QTableWidgetItem(rule.get("target_entity", "*"))
         

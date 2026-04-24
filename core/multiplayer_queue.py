@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QThread, Signal, QObject
 
 if TYPE_CHECKING:
-    from core.arbitrator import Arbitrator
+    from core.arbitrator import ArbitratorEngine
     from llm_engine.base import LLMMessage
 
 @dataclass
@@ -34,7 +34,7 @@ class ArbitratorWorker(QThread):
     Background worker that processes player actions sequentially from a FIFO queue.
     Ensures that only one turn is being resolved at a time to prevent DB race conditions.
     """
-    def __init__(self, arbitrator: "Arbitrator"):
+    def __init__(self, arbitrator: "ArbitratorEngine"):
         super().__init__()
         self._arbitrator = arbitrator
         self._queue: queue.Queue[PlayerAction] = queue.Queue()

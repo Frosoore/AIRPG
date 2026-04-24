@@ -193,6 +193,7 @@ class ScheduledEventsEditorWidget(QWidget):
         
         title_text = event.get("title", tr("new_event")) if event else tr("new_event")
         it_title = QTableWidgetItem(title_text)
+        it_title.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_FileDialogDetailedView))
         it_title.setData(Qt.UserRole, event.get("event_id") if event else str(uuid.uuid4()))
         
         it_desc = QTableWidgetItem(event.get("description", "") if event else "")

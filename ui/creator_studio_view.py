@@ -184,6 +184,10 @@ class CreatorStudioView(QWidget):
         self._temp_label_row.setText(tr("llm_temp"))
         self._top_p_label_row.setText(tr("llm_top_p"))
         self._verbosity_label_row.setText(f"{tr('verbosity')}:")
+        
+        self._lore_edit.setPlaceholderText(tr("global_lore_placeholder"))
+        self._system_prompt_edit.setPlaceholderText(tr("system_prompt_placeholder"))
+        self._first_message_edit.setPlaceholderText(tr("first_msg_placeholder"))
 
         self._entity_editor.retranslate_ui()
         self._rule_editor.retranslate_ui()

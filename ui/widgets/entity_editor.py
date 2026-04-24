@@ -213,6 +213,7 @@ class EntityEditorWidget(QWidget):
         self._table.insertRow(row)
         
         it_id = QTableWidgetItem(ent.get("entity_id", ""))
+        it_id.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_FileDialogDetailedView))
         
         etype = ent.get("entity_type", "npc")
         it_type = QTableWidgetItem(tr(f"entity_{etype}"))
