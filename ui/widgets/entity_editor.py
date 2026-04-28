@@ -63,17 +63,6 @@ class EntityEditorWidget(QWidget):
         header_row.addWidget(self._header)
         header_row.addStretch()
         
-        # Dual Populate Menu
-        self._populate_btn = QPushButton(f"{tr('populate')} ✨")
-        self._populate_menu = QMenu(self)
-        self._pop_auto_action = self._populate_menu.addAction(tr("populate_tooltip") or "Generate from Lore/Stats")
-        self._pop_custom_action = self._populate_menu.addAction("Populate from Custom Text...")
-        self._populate_btn.setMenu(self._populate_menu)
-        
-        self._pop_auto_action.triggered.connect(lambda: self.populate_requested.emit("auto", None))
-        self._pop_custom_action.triggered.connect(self._on_custom_populate_clicked)
-        
-        header_row.addWidget(self._populate_btn)
         left_layout.addLayout(header_row)
 
         # Input Row (Write before Add)
@@ -157,7 +146,6 @@ class EntityEditorWidget(QWidget):
         self._header.setText(f"<b>{tr('tab_entities')}</b>")
         self._add_btn.setText(f"{tr('add')} +")
         self._del_btn.setText(tr("delete"))
-        self._populate_btn.setText(f"{tr('populate')} ✨")
         
         self._in_id.setPlaceholderText(tr("id"))
         self._in_name.setPlaceholderText(tr("name"))
@@ -355,11 +343,6 @@ class EntityEditorWidget(QWidget):
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
         self.changed.emit()
-
-    def _on_custom_populate_clicked(self) -> None:
-        text, ok = QInputDialog.getMultiLineText(self, "Populate ✨", "Describe the entities to generate (NPCs, Factions...):")
-        if ok and text.strip():
-            self.populate_requested.emit("custom", text.strip())
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key_Delete:

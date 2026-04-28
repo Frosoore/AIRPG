@@ -238,6 +238,206 @@ class TickModifiersTask(BaseDbTask):
         return mp.tick_modifiers(self.save_id, self.elapsed_minutes)
 
 
+class PopulateMetaTask(BaseDbTask):
+    """AI-driven metadata refinement (Name, Global Lore, First Message)."""
+    def __init__(self, db_path: str, mode: str = "auto", custom_text: str | None = None):
+        super().__init__(db_path)
+        self.mode = mode
+        self.custom_text = custom_text
+
+    def execute(self) -> bool:
+        from core.config import load_config, build_llm_from_config
+        from llm_engine.prompt_builder import build_populate_meta_prompt
+        
+        self.signals.status.emit("Initializing AI backend...")
+        cfg = load_config()
+        try:
+            llm = build_llm_from_config(cfg, model_override=cfg.extraction_model)
+        except Exception as e:
+            print(f"[POPULATE_META] Failed to build LLM backend: {e}")
+            return False
+            
+        with get_connection(self.db_path) as conn:
+            meta_rows = conn.execute("SELECT key, value FROM Universe_Meta;").fetchall()
+            current_meta = {r[0]: r[1] for r in meta_rows}
+
+        self.signals.status.emit("Refining universe metadata...")
+        prompt = build_populate_meta_prompt(current_meta, 
+                                            custom_instruction=self.custom_text if self.mode == "custom" else None)
+        
+        try:
+            resp = llm.complete(prompt, response_format="json")
+            data = resp.tool_call if isinstance(resp.tool_call, dict) else {}
+            
+            if data:
+                with get_connection(self.db_path) as conn:
+                    if "universe_name" in data:
+                        conn.execute("INSERT OR REPLACE INTO Universe_Meta (key, value) VALUES ('universe_name', ?);", (data["universe_name"],))
+                    if "global_lore" in data:
+                        conn.execute("INSERT OR REPLACE INTO Universe_Meta (key, value) VALUES ('global_lore', ?);", (data["global_lore"],))
+                    if "system_prompt" in data:
+                        conn.execute("INSERT OR REPLACE INTO Universe_Meta (key, value) VALUES ('system_prompt', ?);", (data["system_prompt"],))
+                    if "first_message" in data:
+                        conn.execute("INSERT OR REPLACE INTO Universe_Meta (key, value) VALUES ('first_message', ?);", (data["first_message"],))
+                    conn.commit()
+                self.signals.status.emit("Metadata refinement complete.")
+                return True
+        except Exception as e:
+            print(f"[POPULATE_META] Error: {e}")
+        
+        return False
+
+class PopulateStatsTask(BaseDbTask):
+    """AI-driven stat definitions generation."""
+    def __init__(self, db_path: str, mode: str = "auto", custom_text: str | None = None):
+        super().__init__(db_path)
+        self.mode = mode
+        self.custom_text = custom_text
+
+    def execute(self) -> int:
+        from core.config import load_config, build_llm_from_config
+        from llm_engine.prompt_builder import build_populate_stats_prompt
+        
+        cfg = load_config()
+        try:
+            llm = build_llm_from_config(cfg, model_override=cfg.extraction_model)
+        except Exception as e:
+            print(f"[POPULATE_STATS] Failed to build LLM backend: {e}")
+            return 0
+            
+        with get_connection(self.db_path) as conn:
+            row = conn.execute("SELECT value FROM Universe_Meta WHERE key = 'global_lore';").fetchone()
+            global_lore = row[0] if row else ""
+            st_rows = conn.execute("SELECT name FROM Stat_Definitions;").fetchall()
+            existing_stats = [r[0] for r in st_rows]
+
+        self.signals.status.emit("Generating stat definitions...")
+        prompt = build_populate_stats_prompt(global_lore, existing_stats, 
+                                             custom_instruction=self.custom_text if self.mode == "custom" else None)
+        
+        try:
+            resp = llm.complete(prompt, response_format="json")
+            batch = []
+            if isinstance(resp.tool_call, dict):
+                batch = resp.tool_call.get("stats", [])
+            
+            inserted = 0
+            if batch:
+                with get_connection(self.db_path) as conn:
+                    for s in batch:
+                        if s.get("name") and s["name"] not in existing_stats:
+                            conn.execute(
+                                "INSERT INTO Stat_Definitions (name, description, value_type, parameters) VALUES (?, ?, ?, ?);",
+                                (s["name"], s.get("description", ""), s.get("value_type", "numeric"), json.dumps(s.get("parameters", {})))
+                            )
+                            inserted += 1
+                    conn.commit()
+                self.signals.status.emit(f"Stats generation complete: {inserted} added.")
+                return inserted
+        except Exception as e:
+            print(f"[POPULATE_STATS] Error: {e}")
+        
+        return 0
+
+class PopulateRulesTask(BaseDbTask):
+    """AI-driven rule generation."""
+    def __init__(self, db_path: str, mode: str = "auto", custom_text: str | None = None):
+        super().__init__(db_path)
+        self.mode = mode
+        self.custom_text = custom_text
+
+    def execute(self) -> int:
+        from core.config import load_config, build_llm_from_config
+        from llm_engine.prompt_builder import build_populate_rules_prompt
+        
+        cfg = load_config()
+        try:
+            llm = build_llm_from_config(cfg, model_override=cfg.extraction_model)
+        except Exception as e:
+            return 0
+            
+        with get_connection(self.db_path) as conn:
+            row = conn.execute("SELECT value FROM Universe_Meta WHERE key = 'global_lore';").fetchone()
+            global_lore = row[0] if row else ""
+            st_rows = conn.execute("SELECT name FROM Stat_Definitions;").fetchall()
+            stat_names = [r[0] for r in st_rows]
+            rl_rows = conn.execute("SELECT rule_id FROM Rules;").fetchall()
+            existing_rules = [r[0] for r in rl_rows]
+
+        self.signals.status.emit("Generating game rules...")
+        prompt = build_populate_rules_prompt(global_lore, stat_names, existing_rules, 
+                                              custom_instruction=self.custom_text if self.mode == "custom" else None)
+        
+        try:
+            resp = llm.complete(prompt, response_format="json")
+            batch = []
+            if isinstance(resp.tool_call, dict):
+                batch = resp.tool_call.get("rules", [])
+            
+            inserted = 0
+            if batch:
+                with get_connection(self.db_path) as conn:
+                    for r in batch:
+                        if r.get("rule_id") and r["rule_id"] not in existing_rules:
+                            conn.execute(
+                                "INSERT INTO Rules (rule_id, priority, conditions_json, actions_json) VALUES (?, ?, ?, ?);",
+                                (r["rule_id"], r.get("priority", 10), json.dumps(r.get("conditions", [])), json.dumps(r.get("actions", [])))
+                            )
+                            inserted += 1
+                    conn.commit()
+                return inserted
+        except Exception as e:
+            pass
+        return 0
+
+class PopulateEventsTask(BaseDbTask):
+    """AI-driven event scheduling."""
+    def __init__(self, db_path: str, mode: str = "auto", custom_text: str | None = None):
+        super().__init__(db_path)
+        self.mode = mode
+        self.custom_text = custom_text
+
+    def execute(self) -> int:
+        from core.config import load_config, build_llm_from_config
+        from llm_engine.prompt_builder import build_populate_events_prompt
+        
+        cfg = load_config()
+        try:
+            llm = build_llm_from_config(cfg, model_override=cfg.extraction_model)
+        except Exception as e:
+            return 0
+            
+        with get_connection(self.db_path) as conn:
+            row = conn.execute("SELECT value FROM Universe_Meta WHERE key = 'global_lore';").fetchone()
+            global_lore = row[0] if row else ""
+            ev_rows = conn.execute("SELECT title FROM Scheduled_Events;").fetchall()
+            existing_events = [r[0] for r in ev_rows]
+
+        self.signals.status.emit("Scheduling world events...")
+        prompt = build_populate_events_prompt(global_lore, existing_events, 
+                                              custom_instruction=self.custom_text if self.mode == "custom" else None)
+        
+        try:
+            resp = llm.complete(prompt, response_format="json")
+            batch = []
+            if isinstance(resp.tool_call, dict):
+                batch = resp.tool_call.get("events", [])
+            
+            inserted = 0
+            if batch:
+                with get_connection(self.db_path) as conn:
+                    for ev in batch:
+                        conn.execute(
+                            "INSERT INTO Scheduled_Events (title, description, trigger_minute) VALUES (?, ?, ?);",
+                            (ev.get("title", "Event"), ev.get("description", ""), ev.get("trigger_minute", 0))
+                        )
+                        inserted += 1
+                    conn.commit()
+                return inserted
+        except Exception as e:
+            pass
+        return 0
+
 class PopulateEntitiesTask(BaseDbTask):
     """Asynchronous entity generation using LLM.
     

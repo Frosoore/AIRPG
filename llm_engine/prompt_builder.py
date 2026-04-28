@@ -139,7 +139,7 @@ CRITICAL RULES:
    If the list is empty, the 'stats' object MUST be empty {}.
 """
 
-POPULATE_LORE_SYSTEM_PROMPT: str = """\
+POPULATE_LORE_SYSTEM_PROMPT = """\
 You are a world-building engine.
 Your task is to expand the lore of a fictional universe based on existing context.
 
@@ -150,6 +150,178 @@ CRITICAL RULES:
 4. Focus on consistency with the existing global lore and themes.
 5. Provide rich, evocative content for each entry.
 """
+
+POPULATE_STATS_SYSTEM_PROMPT = """\
+You are a game designer.
+Your task is to define a set of core statistical attributes (Stats) for a role-playing game universe.
+
+CRITICAL RULES:
+1. Respond ONLY with a ~~~json ... ~~~ fenced block.
+2. value_type must be strictly 'numeric' or 'categorical'.
+3. For 'numeric', provide 'min' and 'max' in parameters.
+4. For 'categorical', provide a list of 'options' in parameters.
+"""
+
+POPULATE_RULES_SYSTEM_PROMPT = """\
+You are a logic engine and game balancer.
+Your task is to create deterministic game rules that trigger based on entity stats.
+
+CRITICAL RULES:
+1. Respond ONLY with a ~~~json ... ~~~ fenced block.
+2. Use existing stat names provided.
+3. Actions should be logical consequences (e.g., if Health <= 0, then set Status to 'Dead').
+"""
+
+POPULATE_EVENTS_SYSTEM_PROMPT = """\
+You are a narrative designer.
+Your task is to schedule interesting world events at specific times.
+
+CRITICAL RULES:
+1. Respond ONLY with a ~~~json ... ~~~ fenced block.
+2. Trigger minutes are absolute (e.g., 480 for 8:00 AM).
+"""
+
+POPULATE_META_SYSTEM_PROMPT = """\
+You are a creative director.
+Your task is to refine or generate the foundational metadata for a game universe.
+
+CRITICAL RULES:
+1. Respond ONLY with a ~~~json ... ~~~ fenced block.
+2. Generate a compelling name, foundational lore, and a welcoming first message.
+"""
+
+def build_populate_meta_prompt(
+    current_meta: dict,
+    custom_instruction: str | None = None
+) -> list[LLMMessage]:
+    """Assemble the prompt for the 'Populate' Metadata generator."""
+    task_desc = "Refine the universe's foundational metadata (Name, Global Lore, System Prompt, First Message)."
+    if custom_instruction:
+        task_desc = f"GENERATE/REFINE universe metadata based on this instruction: {custom_instruction}"
+
+    user_content = (
+        f"TASK: {task_desc}\n"
+        "OUTPUT REQUIREMENT: Respond ONLY with the JSON block.\n\n"
+        "~~~json\n"
+        "{\n"
+        "  \"universe_name\": \"<CATCHY_NAME>\",\n"
+        "  \"global_lore\": \"<FOUNDATIONAL_CONTEXT_FOR_AI>\",\n"
+        "  \"system_prompt\": \"<AI_NARRATOR_INSTRUCTIONS>\",\n"
+        "  \"first_message\": \"<INTRO_TEXT_FOR_PLAYER>\"\n"
+        "}\n"
+        "~~~\n\n"
+        f"CURRENT METADATA:\n{json.dumps(current_meta, indent=2)}"
+    )
+    return [
+        {"role": "system", "content": POPULATE_META_SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+
+def build_populate_stats_prompt(
+    global_lore: str,
+    existing_stats: list[str],
+    custom_instruction: str | None = None
+) -> list[LLMMessage]:
+    """Assemble the prompt for the 'Populate' Stats generator."""
+    task_desc = "Define core RPG stats (e.g. Strength, Health, Reputation) suitable for this world."
+    if custom_instruction:
+        task_desc = f"GENERATE new stat definitions based on this instruction: {custom_instruction}"
+
+    user_content = (
+        f"WORLD LORE:\n{global_lore}\n\n"
+        f"EXISTING STATS: {', '.join(existing_stats)}\n\n"
+        f"TASK: {task_desc}\n"
+        "~~~json\n"
+        "{\n"
+        "  \"stats\": [\n"
+        "    {\n"
+        "      \"name\": \"<STAT_NAME>\",\n"
+        "      \"description\": \"<PURPOSE>\",\n"
+        "      \"value_type\": \"numeric\",\n"
+        "      \"parameters\": {\"min\": 0, \"max\": 100}\n"
+        "    },\n"
+        "    {\n"
+        "      \"name\": \"<OTHER_STAT>\",\n"
+        "      \"description\": \"<PURPOSE>\",\n"
+        "      \"value_type\": \"categorical\",\n"
+        "      \"parameters\": {\"options\": [\"Option A\", \"Option B\"]}\n"
+        "    }\n"
+        "  ]\n"
+        "}\n"
+        "~~~"
+    )
+    return [
+        {"role": "system", "content": POPULATE_STATS_SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+
+def build_populate_rules_prompt(
+    global_lore: str,
+    stat_names: list[str],
+    existing_rules: list[str],
+    custom_instruction: str | None = None
+) -> list[LLMMessage]:
+    """Assemble the prompt for the 'Populate' Rules generator."""
+    task_desc = "Create logic rules (e.g. 'If Health <= 0 then Status = Dead')."
+    if custom_instruction:
+        task_desc = f"GENERATE rules based on this instruction: {custom_instruction}"
+
+    user_content = (
+        f"WORLD LORE:\n{global_lore}\n\n"
+        f"AVAILABLE STATS: {', '.join(stat_names)}\n\n"
+        f"TASK: {task_desc}\n"
+        "~~~json\n"
+        "{\n"
+        "  \"rules\": [\n"
+        "    {\n"
+        "      \"rule_id\": \"<UNIQUE_ID>\",\n"
+        "      \"priority\": 10,\n"
+        "      \"conditions\": [\n"
+        "        {\"target\": \"*\", \"stat\": \"Health\", \"comparator\": \"<=\", \"value\": \"0\"}\n"
+        "      ],\n"
+        "      \"actions\": [\n"
+        "        {\"type\": \"stat_set\", \"stat\": \"Status\", \"value\": \"Dead\"}\n"
+        "      ]\n"
+        "    }\n"
+        "  ]\n"
+        "}\n"
+        "~~~"
+    )
+    return [
+        {"role": "system", "content": POPULATE_RULES_SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+
+def build_populate_events_prompt(
+    global_lore: str,
+    existing_events: list[str],
+    custom_instruction: str | None = None
+) -> list[LLMMessage]:
+    """Assemble the prompt for the 'Populate' Events generator."""
+    task_desc = "Schedule world events (e.g. 'The Festival of Lights' at minute 1200)."
+    if custom_instruction:
+        task_desc = f"GENERATE events based on this instruction: {custom_instruction}"
+
+    user_content = (
+        f"WORLD LORE:\n{global_lore}\n\n"
+        f"TASK: {task_desc}\n"
+        "~~~json\n"
+        "{\n"
+        "  \"events\": [\n"
+        "    {\n"
+        "      \"title\": \"<EVENT_TITLE>\",\n"
+        "      \"description\": \"<WHAT_HAPPENS>\",\n"
+        "      \"trigger_minute\": 600\n"
+        "    }\n"
+        "  ]\n"
+        "}\n"
+        "~~~"
+    )
+    return [
+        {"role": "system", "content": POPULATE_EVENTS_SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+
 
 def build_populate_prompt(
     lore_chunks: str,

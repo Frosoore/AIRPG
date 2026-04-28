@@ -43,15 +43,11 @@ class LoreBookEditorWidget(QWidget):
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
 
-        # Header & Populate
+        # Header
         top_row = QHBoxLayout()
         self._header = QLabel(f"<b>{tr('tab_lore')}</b>")
         top_row.addWidget(self._header)
         top_row.addStretch()
-        
-        self._populate_btn = QPushButton(f"{tr('populate')} ✨")
-        self._populate_btn.clicked.connect(self._on_populate_clicked)
-        top_row.addWidget(self._populate_btn)
         layout.addLayout(top_row)
 
         # Input Row (Write before Add)
@@ -109,7 +105,6 @@ class LoreBookEditorWidget(QWidget):
         self._header.setText(f"<b>{tr('tab_lore')}</b>")
         self._add_btn.setText(f"{tr('add')} +")
         self._del_btn.setText(tr("delete"))
-        self._populate_btn.setText(f"{tr('populate')} ✨")
         self._in_name.setPlaceholderText(tr("name"))
         self._add_cat_btn.setText("+")
         self._add_cat_btn.setToolTip(tr("add_category_tooltip") if "add_category_tooltip" in tr("ready") else "Add new category")
@@ -218,11 +213,6 @@ class LoreBookEditorWidget(QWidget):
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
         self.changed.emit()
-
-    def _on_populate_clicked(self) -> None:
-        text, ok = QInputDialog.getMultiLineText(self, "Populate Lore ✨", "Describe the lore entries to generate (History, Magic, Locations...):")
-        if ok and text.strip():
-            self.populate_requested.emit("custom", text.strip())
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key_Delete:

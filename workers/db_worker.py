@@ -166,7 +166,6 @@ class DbWorker(QObject):
     def populate_entities(self, mode: str = "auto", custom_text: str | None = None) -> None:
         """AI-driven entity generation (asynchronous)."""
         task = PopulateEntitiesTask(self._db_path, mode, custom_text)
-        # We need to reload entities once finished
         task.signals.result.connect(lambda _: self.load_entities_and_rules())
         self._setup_task(task)
 
@@ -175,6 +174,30 @@ class DbWorker(QObject):
         from workers.db_tasks import PopulateLoreTask
         task = PopulateLoreTask(self._db_path, mode, custom_text)
         task.signals.result.connect(lambda _: self.load_entities_and_rules())
+        self._setup_task(task)
+
+    def populate_meta(self, mode: str = "auto", custom_text: str | None = None) -> None:
+        from workers.db_tasks import PopulateMetaTask
+        task = PopulateMetaTask(self._db_path, mode, custom_text)
+        task.signals.result.connect(lambda _: self.load_full_universe())
+        self._setup_task(task)
+
+    def populate_stats(self, mode: str = "auto", custom_text: str | None = None) -> None:
+        from workers.db_tasks import PopulateStatsTask
+        task = PopulateStatsTask(self._db_path, mode, custom_text)
+        task.signals.result.connect(lambda _: self.load_full_universe())
+        self._setup_task(task)
+
+    def populate_rules(self, mode: str = "auto", custom_text: str | None = None) -> None:
+        from workers.db_tasks import PopulateRulesTask
+        task = PopulateRulesTask(self._db_path, mode, custom_text)
+        task.signals.result.connect(lambda _: self.load_full_universe())
+        self._setup_task(task)
+
+    def populate_events(self, mode: str = "auto", custom_text: str | None = None) -> None:
+        from workers.db_tasks import PopulateEventsTask
+        task = PopulateEventsTask(self._db_path, mode, custom_text)
+        task.signals.result.connect(lambda _: self.load_full_universe())
         self._setup_task(task)
 
     # ------------------------------------------------------------------

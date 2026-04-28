@@ -31,6 +31,7 @@ from ui.widgets.lore_book_editor import LoreBookEditorWidget
 from ui.widgets.rule_editor import RuleEditorWidget
 from ui.widgets.stat_definition_editor import StatDefinitionEditorWidget
 from ui.widgets.scheduled_events_editor import ScheduledEventsEditorWidget
+from ui.widgets.populate_tab import PopulateTabWidget
 from workers.db_worker import DbWorker
 from core.config import load_config
 from core.localization import tr
@@ -50,7 +51,7 @@ class CreatorStudioView(QWidget):
         self._save_worker: DbWorker | None = None
         
         # Pending AI operations (Chain: Save -> AI Task)
-        self._pending_ai_task: str | None = None # "entities" or "lore"
+        self._pending_ai_tasks: list[str] = [] 
         self._pending_ai_mode: str = "auto"
         self._pending_ai_text: str | None = None
 
@@ -83,6 +84,7 @@ class CreatorStudioView(QWidget):
         self._stat_editor = StatDefinitionEditorWidget()
         self._lore_book_editor = LoreBookEditorWidget()
         self._scheduled_events_editor = ScheduledEventsEditorWidget()
+        self._populate_tab = PopulateTabWidget()
         
         self._tabs.addTab(self._build_lore_tab(), tr("tab_meta"))
         self._tabs.addTab(self._stat_editor, tr("stats"))
@@ -90,6 +92,7 @@ class CreatorStudioView(QWidget):
         self._tabs.addTab(self._rule_editor, tr("tab_rules"))
         self._tabs.addTab(self._scheduled_events_editor, tr("tab_events"))
         self._tabs.addTab(self._lore_book_editor, tr("tab_lore"))
+        self._tabs.addTab(self._populate_tab, tr("populate"))
         layout.addWidget(self._tabs)
 
         # Connections
@@ -97,8 +100,7 @@ class CreatorStudioView(QWidget):
         self._save_btn.clicked.connect(self._on_save_clicked)
         self._back_btn.clicked.connect(self._on_back_clicked)
         
-        self._entity_editor.populate_requested.connect(self._on_pop_entities_req)
-        self._lore_book_editor.populate_requested.connect(self._on_pop_lore_req)
+        self._populate_tab.populate_requested.connect(self._on_populate_requested)
 
     def _setup_shortcuts(self) -> None:
         self._save_shortcut = QShortcut(QKeySequence("Ctrl+S"), self)
@@ -175,6 +177,7 @@ class CreatorStudioView(QWidget):
         self._tabs.setTabText(3, tr("tab_rules"))
         self._tabs.setTabText(4, tr("tab_events"))
         self._tabs.setTabText(5, tr("tab_lore"))
+        self._tabs.setTabText(6, tr("populate"))
 
         self._lore_group.setTitle(tr("world_lore"))
         self._prompt_group.setTitle(tr("sys_prompt_override"))
@@ -263,24 +266,26 @@ class CreatorStudioView(QWidget):
     @Slot()
     def _on_save_complete(self) -> None:
         self._main_window.on_status_update(tr("universe_saved"))
-        if self._pending_ai_task:
-            task = self._pending_ai_task
-            self._pending_ai_task = None
-            if task == "entities":
-                self._db_worker.populate_entities(self._pending_ai_mode, self._pending_ai_text)
-            elif task == "lore":
-                self._db_worker.populate_lore(self._pending_ai_mode, self._pending_ai_text)
+        if self._pending_ai_tasks:
+            tasks = list(self._pending_ai_tasks)
+            self._pending_ai_tasks = []
+            for task in tasks:
+                if task == "meta":
+                    self._db_worker.populate_meta(self._pending_ai_mode, self._pending_ai_text)
+                elif task == "stats":
+                    self._db_worker.populate_stats(self._pending_ai_mode, self._pending_ai_text)
+                elif task == "entities":
+                    self._db_worker.populate_entities(self._pending_ai_mode, self._pending_ai_text)
+                elif task == "rules":
+                    self._db_worker.populate_rules(self._pending_ai_mode, self._pending_ai_text)
+                elif task == "events":
+                    self._db_worker.populate_events(self._pending_ai_mode, self._pending_ai_text)
+                elif task == "lore":
+                    self._db_worker.populate_lore(self._pending_ai_mode, self._pending_ai_text)
 
-    @Slot(str, object)
-    def _on_pop_entities_req(self, mode: str, text: str | None) -> None:
-        self._pending_ai_task = "entities"
-        self._pending_ai_mode = mode
-        self._pending_ai_text = text
-        self._on_save_clicked()
-
-    @Slot(str, object)
-    def _on_pop_lore_req(self, mode: str, text: str | None) -> None:
-        self._pending_ai_task = "lore"
+    @Slot(list, str, object)
+    def _on_populate_requested(self, tasks: list[str], mode: str, text: str | None) -> None:
+        self._pending_ai_tasks = tasks
         self._pending_ai_mode = mode
         self._pending_ai_text = text
         self._on_save_clicked()
