@@ -70,9 +70,9 @@ class CreatorStudioView(QWidget):
         header.addStretch()
 
         self._save_btn = QPushButton(f"{tr('save_changes')} (Ctrl+S)")
-        self._save_btn.setToolTip("Commit all changes across all tabs to the database.")
+        self._save_btn.setToolTip(tr("save_changes_tooltip") if "save_changes_tooltip" in tr("ready") else "Save all changes to the universe database (Ctrl+S)")
         self._back_btn = QPushButton(tr("hub"))
-        self._back_btn.setToolTip("Return to the universe selection screen.")
+        self._back_btn.setToolTip(tr("back_to_hub_tooltip") if "back_to_hub_tooltip" in tr("ready") else "Return to the main library Hub")
         header.addWidget(self._save_btn)
         header.addWidget(self._back_btn)
         layout.addLayout(header)
@@ -100,11 +100,17 @@ class CreatorStudioView(QWidget):
         self._save_btn.clicked.connect(self._on_save_clicked)
         self._back_btn.clicked.connect(self._on_back_clicked)
         
+        self._lore_book_editor.populate_requested.connect(self._on_populate_requested_single)
         self._populate_tab.populate_requested.connect(self._on_populate_requested)
 
     def _setup_shortcuts(self) -> None:
         self._save_shortcut = QShortcut(QKeySequence("Ctrl+S"), self)
         self._save_shortcut.activated.connect(self._on_save_clicked)
+        
+        # Tab Navigation (Ctrl+1 to Ctrl+7)
+        for i in range(7):
+            shortcut = QShortcut(QKeySequence(f"Ctrl+{i+1}"), self)
+            shortcut.activated.connect(lambda idx=i: self._tabs.setCurrentIndex(idx))
 
     def _build_lore_tab(self) -> QWidget:
         tab = QWidget()
@@ -289,6 +295,11 @@ class CreatorStudioView(QWidget):
         self._pending_ai_mode = mode
         self._pending_ai_text = text
         self._on_save_clicked()
+
+    @Slot(str, object)
+    def _on_populate_requested_single(self, task: str, text: str | None) -> None:
+        """Helper for single-tab populate buttons."""
+        self._on_populate_requested([task], "auto", text)
 
     def _on_meta_loaded(self, meta: dict) -> None:
         name = meta.get("universe_name", "Universe")

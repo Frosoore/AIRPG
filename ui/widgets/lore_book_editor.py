@@ -56,17 +56,21 @@ class LoreBookEditorWidget(QWidget):
         self._in_category = QComboBox()
         self._in_category.addItems(self._categories)
         self._in_category.setEditable(False)
+        self._in_category.setToolTip("Select the category for the new lore entry")
         
         self._add_cat_btn = QPushButton("+")
-        self._add_cat_btn.setToolTip(tr("add_category_tooltip") if "add_category_tooltip" in tr("ready") else "Add new category")
+        self._add_cat_btn.setToolTip(tr("add_category_tooltip") if "add_category_tooltip" in tr("ready") else "Define a new lore category")
         self._add_cat_btn.setFixedWidth(40)
         self._add_cat_btn.clicked.connect(self._on_add_category)
         
         self._in_name = QLineEdit()
         self._in_name.setPlaceholderText(tr("name"))
+        self._in_name.setToolTip("Title or subject of the lore entry")
+        self._in_name.returnPressed.connect(self._on_add_clicked)
         
         self._add_btn = QPushButton(f"{tr('add')} +")
         self._add_btn.setStyleSheet("background-color: #27ae60; font-weight: bold;")
+        self._add_btn.setToolTip("Add this entry to the lore book (Enter)")
         self._add_btn.clicked.connect(self._on_add_clicked)
 
         input_group.addWidget(self._in_category, 2)
@@ -83,6 +87,7 @@ class LoreBookEditorWidget(QWidget):
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self._table.setSelectionBehavior(QAbstractItemView.SelectItems)
+        self._table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self._table.setAlternatingRowColors(True)
         self._table.itemChanged.connect(self._on_item_changed)
         layout.addWidget(self._table)
@@ -90,9 +95,16 @@ class LoreBookEditorWidget(QWidget):
         # Bottom Actions
         bottom_row = QHBoxLayout()
         self._del_btn = QPushButton(tr("delete"))
-        self._del_btn.setToolTip(f"{tr('delete')} (Del)")
+        self._del_btn.setToolTip(f"{tr('delete_lore_tooltip') if 'delete_lore_tooltip' in tr('ready') else 'Remove selected lore entries'} (Del)")
         bottom_row.addWidget(self._del_btn)
+        
         bottom_row.addStretch()
+        
+        self._populate_btn = QPushButton(f"{tr('populate') if 'populate' in tr('ready') else 'Populate'} ✨")
+        self._populate_btn.setToolTip("Use AI to generate lore based on your current universe settings")
+        self._populate_btn.clicked.connect(lambda: self.populate_requested.emit("lore", None))
+        bottom_row.addWidget(self._populate_btn)
+        
         layout.addLayout(bottom_row)
 
         self._del_btn.clicked.connect(self._on_delete_clicked)
@@ -212,10 +224,68 @@ class LoreBookEditorWidget(QWidget):
         self.changed.emit()
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
+        if self._table.signalsBlocked():
+            return
+
+        selected = self._table.selectedItems()
+        if len(selected) > 1 and item in selected:
+            self._table.blockSignals(True)
+            new_text = item.text()
+            col = item.column()
+            for other in selected:
+                if other != item and other.column() == col:
+                    # Category column uses widgets, so we handle only columns 1 and 2
+                    if other.column() > 0:
+                        other.setText(new_text)
+            self._table.blockSignals(False)
+
         self.changed.emit()
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key_Delete:
-            self._on_delete_clicked()
+            selected_items = self._table.selectedItems()
+            if not selected_items:
+                return
+
+            rows = set()
+            for item in selected_items:
+                rows.add(item.row())
+
+            all_cols_selected = True
+            for r in rows:
+                for c in range(self._table.columnCount()):
+                    if self._table.item(r, c) not in selected_items:
+                        # For column 0, item() might be None because it's a cellWidget
+                        # So we check if the row is effectively selected
+                        pass 
+                
+            # If any cell in a row is selected, and we want spreadsheet behavior, 
+            # we check if the whole row selection was intended.
+            # Simplified: if multiple rows worth of cells are selected, we might clear them.
+            # If they selected from headers (SelectRows), we delete.
+            
+            # Let's use a consistent logic: if all items in row are in selected_items -> delete row.
+            # Note: cellWidget columns (like col 0) don't have items.
+            is_full_row_delete = True
+            for r in rows:
+                for c in range(1, self._table.columnCount()):
+                    if self._table.item(r, c) not in selected_items:
+                        is_full_row_delete = False
+                        break
+                if not is_full_row_delete: break
+            
+            if is_full_row_delete:
+                self._on_delete_clicked()
+            else:
+                self._table.blockSignals(True)
+                for item in selected_items:
+                    item.setText("")
+                self._table.blockSignals(False)
+                self.changed.emit()
+        elif event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+            if self._in_name.hasFocus():
+                self._on_add_clicked()
+            else:
+                super().keyPressEvent(event)
         else:
             super().keyPressEvent(event)

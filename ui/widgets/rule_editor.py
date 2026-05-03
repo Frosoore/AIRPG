@@ -54,13 +54,21 @@ class RuleEditorWidget(QWidget):
         input_group = QHBoxLayout()
         self._in_id = QLineEdit()
         self._in_id.setPlaceholderText(tr("rule_id"))
+        self._in_id.setToolTip("Unique identifier for this rule")
+        self._in_id.returnPressed.connect(self._on_add_clicked)
+
         self._in_priority = QSpinBox()
         self._in_priority.setRange(0, 999)
+        self._in_priority.setToolTip("Higher priority rules fire first")
+        
         self._in_target = QLineEdit()
         self._in_target.setPlaceholderText(tr("placeholder_target"))
+        self._in_target.setToolTip("Entity ID this rule applies to ('*' for all)")
+        self._in_target.returnPressed.connect(self._on_add_clicked)
         
         self._add_btn = QPushButton(f"{tr('add')} +")
         self._add_btn.setStyleSheet("background-color: #27ae60; font-weight: bold;")
+        self._add_btn.setToolTip("Add this rule to the universe (Enter)")
         self._add_btn.clicked.connect(self._on_add_clicked)
 
         input_group.addWidget(self._in_id, 2)
@@ -78,6 +86,7 @@ class RuleEditorWidget(QWidget):
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self._table.setSelectionBehavior(QAbstractItemView.SelectItems)
+        self._table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self._table.setAlternatingRowColors(True)
         self._table.currentCellChanged.connect(lambda r, c, pr, pc: self._on_row_selected())
         self._table.itemChanged.connect(self._on_item_changed)
@@ -101,7 +110,8 @@ class RuleEditorWidget(QWidget):
         
         self._cond_table = QTableWidget(0, 3)
         self._cond_table.setHorizontalHeaderLabels([tr("stat"), tr("comparator"), tr("value")])
-        self._cond_table.horizontalHeader().setStretchLastSection(True)
+        self._cond_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self._cond_table.setSelectionBehavior(QAbstractItemView.SelectItems)
         cond_layout.addWidget(self._cond_table)
         
         cond_btns = QHBoxLayout()
@@ -122,7 +132,8 @@ class RuleEditorWidget(QWidget):
         
         self._act_table = QTableWidget(0, 4)
         self._act_table.setHorizontalHeaderLabels([tr("type"), tr("target"), tr("stat"), tr("value")])
-        self._act_table.horizontalHeader().setStretchLastSection(True)
+        self._act_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self._act_table.setSelectionBehavior(QAbstractItemView.SelectItems)
         act_layout.addWidget(self._act_table)
         
         act_btns = QHBoxLayout()
@@ -141,7 +152,7 @@ class RuleEditorWidget(QWidget):
 
         # Global delete
         self._del_rule_btn = QPushButton(tr("delete"))
-        self._del_rule_btn.setToolTip(f"{tr('delete')} (Del)")
+        self._del_rule_btn.setToolTip(f"{tr('delete_rule_tooltip') if 'delete_rule_tooltip' in tr('ready') else 'Remove selected rules'} (Del)")
         self._del_rule_btn.clicked.connect(self._on_delete_rule)
         layout.addWidget(self._del_rule_btn)
 
@@ -378,17 +389,60 @@ class RuleEditorWidget(QWidget):
 
     @Slot()
     def _on_delete_rule(self) -> None:
-        r = self._table.currentRow()
-        if 0 <= r < len(self._rules_data):
-            del self._rules_data[r]
-            self._table.removeRow(r)
-            self.changed.emit()
+        indices = self._table.selectionModel().selectedRows()
+        rows = sorted([i.row() for i in indices], reverse=True) if indices else [self._table.currentRow()]
+        for r in rows:
+            if 0 <= r < len(self._rules_data):
+                del self._rules_data[r]
+                self._table.removeRow(r)
+        self.changed.emit()
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
+        if self._table.signalsBlocked():
+            return
+
+        selected = self._table.selectedItems()
+        if len(selected) > 1 and item in selected:
+            self._table.blockSignals(True)
+            new_text = item.text()
+            col = item.column()
+            for other in selected:
+                if other != item and other.column() == col:
+                    other.setText(new_text)
+            self._table.blockSignals(False)
+
         self.changed.emit()
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key_Delete:
-            self._on_delete_rule()
+            selected_items = self._table.selectedItems()
+            if not selected_items:
+                return
+
+            rows = set()
+            for item in selected_items:
+                rows.add(item.row())
+
+            all_cols_selected = True
+            for r in rows:
+                for c in range(self._table.columnCount()):
+                    if self._table.item(r, c) not in selected_items:
+                        all_cols_selected = False
+                        break
+                if not all_cols_selected: break
+
+            if all_cols_selected:
+                self._on_delete_rule()
+            else:
+                self._table.blockSignals(True)
+                for item in selected_items:
+                    item.setText("")
+                self._table.blockSignals(False)
+                self.changed.emit()
+        elif event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+            if self._in_id.hasFocus() or self._in_target.hasFocus():
+                self._on_add_clicked()
+            else:
+                super().keyPressEvent(event)
         else:
             super().keyPressEvent(event)

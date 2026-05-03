@@ -64,13 +64,21 @@ class StatDefinitionEditorWidget(QWidget):
         input_group = QHBoxLayout()
         self._id_input = QLineEdit()
         self._id_input.setPlaceholderText(f"{tr('stat')} ID")
+        self._id_input.setToolTip("Unique internal key for the stat (e.g., 'str', 'hp')")
+        self._id_input.returnPressed.connect(self._on_add_clicked)
+
         self._name_input = QLineEdit()
         self._name_input.setPlaceholderText(tr("name"))
+        self._name_input.setToolTip("User-friendly name of the stat")
+        self._name_input.returnPressed.connect(self._on_add_clicked)
+
         self._type_combo = QComboBox()
         self._type_combo.addItems([tr("numeric"), tr("categorical")])
+        self._type_combo.setToolTip("Numeric (0-100) or Categorical (List of options)")
         
         self._add_btn = QPushButton(f"{tr('add')} +")
         self._add_btn.setStyleSheet("background-color: #27ae60; font-weight: bold;")
+        self._add_btn.setToolTip("Add this stat definition to the universe (Enter)")
         
         input_group.addWidget(self._id_input, 2)
         input_group.addWidget(self._name_input, 3)
@@ -88,6 +96,7 @@ class StatDefinitionEditorWidget(QWidget):
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self._table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self._table.setSelectionBehavior(QAbstractItemView.SelectItems)
+        self._table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self._table.setAlternatingRowColors(True)
         self._table.itemChanged.connect(self._on_item_changed)
         layout.addWidget(self._table)
@@ -95,7 +104,7 @@ class StatDefinitionEditorWidget(QWidget):
         # Bottom Actions
         bottom_row = QHBoxLayout()
         self._del_btn = QPushButton(tr("delete"))
-        self._del_btn.setToolTip(f"{tr('delete')} (Del)")
+        self._del_btn.setToolTip(f"{tr('delete_stat_tooltip') if 'delete_stat_tooltip' in tr('ready') else 'Remove selected stat definitions'} (Del)")
         bottom_row.addWidget(self._del_btn)
         bottom_row.addStretch()
         layout.addLayout(bottom_row)
@@ -268,11 +277,55 @@ class StatDefinitionEditorWidget(QWidget):
         self.changed.emit()
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
+        if self._table.signalsBlocked():
+            return
+
+        selected = self._table.selectedItems()
+        if len(selected) > 1 and item in selected:
+            self._table.blockSignals(True)
+            new_text = item.text()
+            col = item.column()
+            for other in selected:
+                if other != item and other.column() == col:
+                    # Column 2 is 'type' which is locked
+                    if other.column() != 2:
+                        other.setText(new_text)
+            self._table.blockSignals(False)
+
         self.changed.emit()
 
     def keyPressEvent(self, event) -> None:
-        """Handle Delete key to remove rows."""
+        """Handle shortcuts for Add and Delete."""
         if event.key() == Qt.Key_Delete:
-            self._on_delete_stat()
+            selected_items = self._table.selectedItems()
+            if not selected_items:
+                return
+
+            rows = set()
+            for item in selected_items:
+                rows.add(item.row())
+
+            is_full_row_delete = True
+            for r in rows:
+                for c in range(self._table.columnCount()):
+                    if self._table.item(r, c) not in selected_items:
+                        is_full_row_delete = False
+                        break
+                if not is_full_row_delete: break
+            
+            if is_full_row_delete:
+                self._on_delete_stat()
+            else:
+                self._table.blockSignals(True)
+                for item in selected_items:
+                    if item.column() != 2:
+                        item.setText("")
+                self._table.blockSignals(False)
+                self.changed.emit()
+        elif event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+            if self._id_input.hasFocus() or self._name_input.hasFocus():
+                self._on_add_clicked()
+            else:
+                super().keyPressEvent(event)
         else:
             super().keyPressEvent(event)

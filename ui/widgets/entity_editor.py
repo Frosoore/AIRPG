@@ -69,14 +69,22 @@ class EntityEditorWidget(QWidget):
         input_group = QHBoxLayout()
         self._in_id = QLineEdit()
         self._in_id.setPlaceholderText(tr("id"))
+        self._in_id.setToolTip("Unique identifier for the entity (e.g., 'hero_01')")
+        self._in_id.returnPressed.connect(self._on_add_clicked)
+
         self._in_type = QComboBox()
         for etype in self._ENTITY_TYPES:
             self._in_type.addItem(tr(f"entity_{etype}"), etype)
+        self._in_type.setToolTip("The category of entity (affects AI behavior)")
+        
         self._in_name = QLineEdit()
         self._in_name.setPlaceholderText(tr("name"))
+        self._in_name.setToolTip("Display name of the entity")
+        self._in_name.returnPressed.connect(self._on_add_clicked)
         
         self._add_btn = QPushButton(f"{tr('add')} +")
         self._add_btn.setStyleSheet("background-color: #27ae60; font-weight: bold;")
+        self._add_btn.setToolTip("Add this entity to the universe (Enter)")
         self._add_btn.clicked.connect(self._on_add_clicked)
 
         input_group.addWidget(self._in_id, 2)
@@ -93,13 +101,14 @@ class EntityEditorWidget(QWidget):
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self._table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self._table.setSelectionBehavior(QAbstractItemView.SelectItems)
+        self._table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self._table.setAlternatingRowColors(True)
         self._table.currentCellChanged.connect(lambda r, c, pr, pc: self._on_row_selected())
         self._table.itemChanged.connect(self._on_item_changed)
         left_layout.addWidget(self._table)
 
         self._del_btn = QPushButton(tr("delete"))
-        self._del_btn.setToolTip(f"{tr('delete')} (Del)")
+        self._del_btn.setToolTip(f"{tr('delete_entity_tooltip') if 'delete_entity_tooltip' in tr('ready') else 'Remove selected entities'} (Del)")
         self._del_btn.clicked.connect(self._on_delete_entity)
         left_layout.addWidget(self._del_btn)
 
@@ -118,8 +127,13 @@ class EntityEditorWidget(QWidget):
 
         stat_btn_row = QHBoxLayout()
         self._add_stat_btn = QPushButton(f"{tr('add_stat')} +")
-        self._add_all_stats_btn = QPushButton("Add All Stats")
+        self._add_stat_btn.setToolTip("Add a single custom stat row")
+        
+        self._add_all_stats_btn = QPushButton(f"{tr('bulk_add_stats') if 'bulk_add_stats' in tr('ready') else 'Bulk Add Stats'}...")
+        self._add_all_stats_btn.setToolTip("Open a dialog to select multiple stats to add at once")
+        
         self._rem_stat_btn = QPushButton(tr("remove_stat"))
+        self._rem_stat_btn.setToolTip("Remove the selected stat from this entity")
         
         stat_btn_row.addWidget(self._add_stat_btn)
         stat_btn_row.addWidget(self._add_all_stats_btn)
@@ -156,6 +170,7 @@ class EntityEditorWidget(QWidget):
         
         self._stats_group.setTitle(tr("initial_stats"))
         self._add_stat_btn.setText(f"{tr('add_stat')} +")
+        self._add_all_stats_btn.setText(f"{tr('bulk_add_stats') if 'bulk_add_stats' in tr('ready') else 'Bulk Add Stats'}...")
         self._rem_stat_btn.setText(tr("remove_stat"))
         self._stats_table.setHorizontalHeaderLabels([tr("stat_name"), tr("initial_value")])
 
@@ -182,14 +197,14 @@ class EntityEditorWidget(QWidget):
         self._sync_stats_from_ui()
         # Ensure description and other fields in _entities_data are up to date from table
         for r in range(self._table.rowCount()):
-            eid = self._table.item(r, 0).text().strip()
             # Find in data (matching by original position or ID)
-            # For simplicity, we assume row index matches _entities_data index
             if r < len(self._entities_data):
-                self._entities_data[r]["entity_id"] = eid
-                self._entities_data[r]["name"] = self._table.item(r, 2).text().strip()
-                self._entities_data[r]["description"] = self._table.item(r, 3).text().strip()
-                # Type is set on add and kept in it_type itemData or text
+                it_id = self._table.item(r, 0)
+                it_name = self._table.item(r, 2)
+                it_desc = self._table.item(r, 3)
+                if it_id: self._entities_data[r]["entity_id"] = it_id.text().strip()
+                if it_name: self._entities_data[r]["name"] = it_name.text().strip()
+                if it_desc: self._entities_data[r]["description"] = it_desc.text().strip()
         return self._entities_data
 
     # ------------------------------------------------------------------
@@ -234,6 +249,7 @@ class EntityEditorWidget(QWidget):
         self._add_entity_row(new_ent)
         self._in_id.clear()
         self._in_name.clear()
+        self._in_id.setFocus() # Task 6: Return focus to start
         self._table.setCurrentCell(self._table.rowCount()-1, 2)
         self.changed.emit()
 
@@ -316,14 +332,38 @@ class EntityEditorWidget(QWidget):
     @Slot()
     def _on_add_all_stats(self) -> None:
         if self._selected_row < 0: return
+        
+        from PySide6.QtWidgets import QDialog, QListWidget, QListWidgetItem, QVBoxLayout, QDialogButtonBox
+        
+        dlg = QDialog(self)
+        dlg.setWindowTitle(tr("select_stats") if "select_stats" in tr("ready") else "Select Stats to Add")
+        dlg.resize(300, 400)
+        dlg_layout = QVBoxLayout(dlg)
+        
+        list_w = QListWidget()
         existing_keys = [self._stats_table.cellWidget(r, 0).currentText() 
                          for r in range(self._stats_table.rowCount()) 
                          if isinstance(self._stats_table.cellWidget(r, 0), QComboBox)]
         
         for sdef in self._stat_defs:
-            if sdef["name"] not in existing_keys:
-                self._add_stat_row_with_data(sdef["name"], "")
-        self.changed.emit()
+            it = QListWidgetItem(sdef["name"])
+            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+            it.setCheckState(Qt.Unchecked if sdef["name"] in existing_keys else Qt.Checked)
+            list_w.addItem(it)
+            
+        dlg_layout.addWidget(list_w)
+        
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        dlg_layout.addWidget(btns)
+        
+        if dlg.exec() == QDialog.Accepted:
+            for i in range(list_w.count()):
+                it = list_w.item(i)
+                if it.checkState() == Qt.Checked and it.text() not in existing_keys:
+                    self._add_stat_row_with_data(it.text(), "")
+            self.changed.emit()
 
     @Slot()
     def _on_remove_stat_row(self) -> None:
@@ -342,10 +382,59 @@ class EntityEditorWidget(QWidget):
         self.changed.emit()
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
+        """Handle bulk editing: if multiple cells are selected, apply change to all."""
+        if self._table.signalsBlocked():
+            return
+
+        selected = self._table.selectedItems()
+        if len(selected) > 1 and item in selected:
+            self._table.blockSignals(True)
+            new_text = item.text()
+            col = item.column()
+            for other in selected:
+                if other != item and other.column() == col:
+                    # Check if it's the 'type' column (readonly-ish)
+                    if col == 1: continue 
+                    other.setText(new_text)
+            self._table.blockSignals(False)
+
         self.changed.emit()
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key_Delete:
-            self._on_delete_entity()
+            selected_items = self._table.selectedItems()
+            if not selected_items:
+                return
+
+            # If whole rows are selected, delete them
+            # Otherwise, just clear cell contents
+            rows = set()
+            for item in selected_items:
+                rows.add(item.row())
+
+            # Check if all columns in these rows are selected
+            all_cols_selected = True
+            for r in rows:
+                for c in range(self._table.columnCount()):
+                    if self._table.item(r, c) not in selected_items:
+                        all_cols_selected = False
+                        break
+                if not all_cols_selected: break
+
+            if all_cols_selected:
+                self._on_delete_entity()
+            else:
+                self._table.blockSignals(True)
+                for item in selected_items:
+                    if item.column() != 1: # Don't clear type
+                        item.setText("")
+                self._table.blockSignals(False)
+                self.changed.emit()
+        elif event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+            # If focusing an input field, trigger add
+            if self._in_id.hasFocus() or self._in_name.hasFocus():
+                self._on_add_clicked()
+            else:
+                super().keyPressEvent(event)
         else:
             super().keyPressEvent(event)

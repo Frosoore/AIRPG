@@ -35,10 +35,14 @@ check_lib() {
     fi
 }
 
-# libxcb-cursor0 is the most frequent missing library for PySide6 on Ubuntu
+# libxcb-cursor0 and libqt6svg6 are frequent missing libraries for PySide6 on Ubuntu
 if command -v ldconfig &>/dev/null; then
     if ! ldconfig -p | grep -q "libxcb-cursor.so.0"; then
         echo "Warning: libxcb-cursor0 might be missing (required for PySide6 GUI)."
+    fi
+    if ! ldconfig -p | grep -q "libQt6Svg.so.6"; then
+        echo "Warning: libqt6svg6 might be missing (required for SVG icons)."
+        echo "You can install it with: sudo apt install libqt6svg6"
     fi
 fi
 

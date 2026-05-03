@@ -132,4 +132,16 @@ Status legend: `[ ]` To Do · `[~]` In Progress · `[x]` Done
 - [ ] 16.3 — Issue Templates (Bug reports / Feature requests)
 - [ ] 16.4 — Security Policy (API key handling documentation)
 
+## Phase 17: Comeback Rework & UX Excellence (Complete)
+- [x] 17.1 — Spreadsheet-like Bulk Editing (Multi-cell sync)
+- [x] 17.2 — Improved Bulk Deletion (Cell clearing vs Row removal)
+- [x] 17.3 — Workflow: Write-before-Add (Focus & Keyboard focus management)
+- [x] 17.4 — Keyboard Navigation: Tab/Enter/Del/Ctrl+S/Ctrl+Num
+- [x] 17.5 — Entity Studio: Bulk Stat Selection Dialog
+- [x] 17.6 — Rule Editor: Strict Stat Validation (Dropdowns only)
+- [x] 17.7 — Lore Book: AI Population & Category Management
+- [x] 17.8 — Scheduled Events: Fully Custom Calendar Support
+- [x] 17.9 — Deployment: SVG Icon Dependency & Absolute Path Fixes
+- [x] 17.10 — UX: Descriptive Tooltips & Consistent ASCII Aesthetic
+
 

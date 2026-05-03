@@ -34,27 +34,46 @@ class ScheduledEventsEditorWidget(QWidget):
         splitter = QSplitter(Qt.Vertical)
 
         # --- Top: Calendar Config ---
-        self._cal_group = QGroupBox("Calendar & Adventure Start")
-        cal_layout = QFormLayout(self._cal_group)
+        self._cal_group = QGroupBox("Universe Calendar & Adventure Start")
+        cal_layout = QHBoxLayout(self._cal_group)
         
+        left_form = QFormLayout()
         self._mph_spin = QSpinBox()
         self._mph_spin.setRange(1, 9999)
         self._mph_spin.setValue(60)
-        self._mph_spin.valueChanged.connect(self._on_cal_changed)
+        self._mph_spin.setToolTip("How many minutes are in one game hour")
         
         self._hpd_spin = QSpinBox()
         self._hpd_spin.setRange(1, 999)
         self._hpd_spin.setValue(24)
-        self._hpd_spin.valueChanged.connect(self._on_cal_changed)
+        self._hpd_spin.setToolTip("How many hours are in one game day")
         
         self._start_day_spin = QSpinBox()
         self._start_day_spin.setRange(1, 99999)
         self._start_day_spin.setValue(1)
-        self._start_day_spin.valueChanged.connect(self._on_cal_changed)
+        self._start_day_spin.setToolTip("The day on which the adventure begins")
+
+        left_form.addRow("Minutes per Hour:", self._mph_spin)
+        left_form.addRow("Hours per Day:", self._hpd_spin)
+        left_form.addRow("Adventure Start Day:", self._start_day_spin)
+        cal_layout.addLayout(left_form, 1)
         
-        cal_layout.addRow("Minutes per Hour:", self._mph_spin)
-        cal_layout.addRow("Hours per Day:", self._hpd_spin)
-        cal_layout.addRow("Adventure Start Day:", self._start_day_spin)
+        right_form = QFormLayout()
+        self._month_edit = QLineEdit()
+        self._month_edit.setPlaceholderText("Month 1, Month 2, ...")
+        self._month_edit.setToolTip("Comma-separated list of month names (e.g., 'Aries, Taurus, ...')")
+        
+        self._preview_label = QLabel()
+        self._preview_label.setStyleSheet("color: #89b4fa; font-weight: bold;")
+        
+        right_form.addRow("Month Names:", self._month_edit)
+        right_form.addRow("Preview Start:", self._preview_label)
+        cal_layout.addLayout(right_form, 2)
+
+        # Connections
+        for s in (self._mph_spin, self._hpd_spin, self._start_day_spin):
+            s.valueChanged.connect(self._on_cal_changed)
+        self._month_edit.textChanged.connect(self._on_cal_changed)
         
         # --- Bottom: Events Table ---
         bot_widget = QWidget()
@@ -64,6 +83,7 @@ class ScheduledEventsEditorWidget(QWidget):
         toolbar = QHBoxLayout()
         self._add_btn = QPushButton(f"{tr('add_event')} +")
         self._add_btn.setStyleSheet("background-color: #27ae60; font-weight: bold;")
+        self._add_btn.setToolTip("Create a new scheduled world event (Enter)")
         self._add_btn.clicked.connect(self._on_add_clicked)
         toolbar.addWidget(self._add_btn)
         
@@ -73,7 +93,7 @@ class ScheduledEventsEditorWidget(QWidget):
         toolbar.addWidget(self._status_label)
         toolbar.addStretch()
         bot_layout.addLayout(toolbar)
-        
+        # Events Table
         self._table = QTableWidget(0, 5)
         self._table.setHorizontalHeaderLabels([
             tr("day"), tr("hour"), tr("minute"), 
@@ -82,12 +102,13 @@ class ScheduledEventsEditorWidget(QWidget):
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self._table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self._table.setSelectionBehavior(QAbstractItemView.SelectItems)
+        self._table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self._table.setAlternatingRowColors(True)
         self._table.itemChanged.connect(self._on_item_changed)
         bot_layout.addWidget(self._table)
         
         self._del_btn = QPushButton(tr("delete"))
-        self._del_btn.setToolTip(f"{tr('delete')} (Del)")
+        self._del_btn.setToolTip(f"{tr('delete_event_tooltip') if 'delete_event_tooltip' in tr('ready') else 'Remove selected events'} (Del)")
         self._del_btn.clicked.connect(self._on_delete_clicked)
         bot_layout.addWidget(self._del_btn)
 
@@ -101,6 +122,7 @@ class ScheduledEventsEditorWidget(QWidget):
     # ------------------------------------------------------------------
 
     def retranslate_ui(self) -> None:
+        self._cal_group.setTitle(tr("calendar_config") if "calendar_config" in tr("ready") else "Universe Calendar & Adventure Start")
         self._add_btn.setText(f"{tr('add_event')} +")
         self._status_label.setText(tr("events_info"))
         self._del_btn.setText(tr("delete"))
@@ -121,12 +143,14 @@ class ScheduledEventsEditorWidget(QWidget):
         self._mph_spin.setValue(self._calendar.minutes_per_hour)
         self._hpd_spin.setValue(self._calendar.hours_per_day)
         self._start_day_spin.setValue(self._calendar.start_day)
+        self._month_edit.setText(", ".join(self._calendar.month_names))
         
         # Load Events
         self._table.setRowCount(0)
         for event in sorted(events, key=lambda x: x.get("trigger_minute", 0)):
             self._add_event_row(event)
             
+        self._update_preview_all()
         self._table.blockSignals(False)
 
     def collect_data(self) -> tuple[list[dict], dict]:
@@ -136,21 +160,35 @@ class ScheduledEventsEditorWidget(QWidget):
         self._calendar.hours_per_day = self._hpd_spin.value()
         self._calendar.start_day = self._start_day_spin.value()
         
+        raw_months = self._month_edit.text().strip()
+        if raw_months:
+            self._calendar.month_names = [m.strip() for m in raw_months.split(",") if m.strip()]
+        
         meta = {"calendar_config": self._calendar.to_json()}
         
         # Events
         events = []
         for row in range(self._table.rowCount()):
-            day = int(self._table.cellWidget(row, 0).value())
-            hour = int(self._table.cellWidget(row, 1).value())
-            minute = int(self._table.cellWidget(row, 2).value())
+            day_w = self._table.cellWidget(row, 0)
+            hour_w = self._table.cellWidget(row, 1)
+            min_w = self._table.cellWidget(row, 2)
+            
+            if not day_w or not hour_w or not min_w: continue
+            
+            day = int(day_w.value())
+            hour = int(hour_w.value())
+            minute = int(min_w.value())
             
             # Use current time system to convert components to absolute mins
             trigger_min = self._time_system.components_to_minutes(day, hour, minute)
             
-            title = self._table.item(row, 3).text()
-            description = self._table.item(row, 4).text()
-            event_id = self._table.item(row, 3).data(Qt.UserRole) or str(uuid.uuid4())
+            it_title = self._table.item(row, 3)
+            it_desc = self._table.item(row, 4)
+            if not it_title or not it_desc: continue
+            
+            title = it_title.text()
+            description = it_desc.text()
+            event_id = it_title.data(Qt.UserRole) or str(uuid.uuid4())
             
             events.append({
                 "event_id": event_id,
@@ -176,11 +214,11 @@ class ScheduledEventsEditorWidget(QWidget):
         day_spin.setValue(day)
         
         hour_spin = QSpinBox()
-        hour_spin.setRange(0, self._calendar.hours_per_day - 1)
+        hour_spin.setRange(0, max(0, self._calendar.hours_per_day - 1))
         hour_spin.setValue(hour)
         
         min_spin = QSpinBox()
-        min_spin.setRange(0, self._calendar.minutes_per_hour - 1)
+        min_spin.setRange(0, max(0, self._calendar.minutes_per_hour - 1))
         min_spin.setValue(minute)
         
         for s in (day_spin, hour_spin, min_spin):
@@ -203,9 +241,14 @@ class ScheduledEventsEditorWidget(QWidget):
         self._update_preview(row)
 
     def _update_preview(self, row: int) -> None:
-        day = int(self._table.cellWidget(row, 0).value())
-        hour = int(self._table.cellWidget(row, 1).value())
-        minute = int(self._table.cellWidget(row, 2).value())
+        day_w = self._table.cellWidget(row, 0)
+        hour_w = self._table.cellWidget(row, 1)
+        min_w = self._table.cellWidget(row, 2)
+        if not day_w or not hour_w or not min_w: return
+        
+        day = int(day_w.value())
+        hour = int(hour_w.value())
+        minute = int(min_w.value())
         
         total_mins = self._time_system.components_to_minutes(day, hour, minute)
         time_str = self._time_system.get_time_string(total_mins)
@@ -214,18 +257,32 @@ class ScheduledEventsEditorWidget(QWidget):
         if it_title:
             it_title.setToolTip(f"{tr('triggers_at')} {time_str}")
 
+    def _update_preview_all(self) -> None:
+        for r in range(self._table.rowCount()):
+            self._update_preview(r)
+        self._preview_label.setText(self._time_system.get_time_string(0))
+
     @Slot()
     def _on_cal_changed(self) -> None:
         self._calendar.minutes_per_hour = self._mph_spin.value()
         self._calendar.hours_per_day = self._hpd_spin.value()
         self._calendar.start_day = self._start_day_spin.value()
+        
+        raw_months = self._month_edit.text().strip()
+        if raw_months:
+            self._calendar.month_names = [m.strip() for m in raw_months.split(",") if m.strip()]
+        
         self._time_system = TimeSystem(self._calendar)
         
         # Update all spinbox ranges
         for r in range(self._table.rowCount()):
-            self._table.cellWidget(r, 1).setRange(0, self._calendar.hours_per_day - 1)
-            self._table.cellWidget(r, 2).setRange(0, self._calendar.minutes_per_hour - 1)
+            h_spin = self._table.cellWidget(r, 1)
+            m_spin = self._table.cellWidget(r, 2)
+            if h_spin: h_spin.setRange(0, max(0, self._calendar.hours_per_day - 1))
+            if m_spin: m_spin.setRange(0, max(0, self._calendar.minutes_per_hour - 1))
             self._update_preview(r)
+        
+        self._preview_label.setText(self._time_system.get_time_string(0))
         self.changed.emit()
 
     @Slot()
@@ -243,10 +300,50 @@ class ScheduledEventsEditorWidget(QWidget):
         self.changed.emit()
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
+        if self._table.signalsBlocked():
+            return
+
+        selected = self._table.selectedItems()
+        if len(selected) > 1 and item in selected:
+            self._table.blockSignals(True)
+            new_text = item.text()
+            col = item.column()
+            for other in selected:
+                if other != item and other.column() == col:
+                    # Column 0,1,2 are spinboxes, so handle only 3 and 4
+                    if other.column() >= 3:
+                        other.setText(new_text)
+            self._table.blockSignals(False)
+
         self.changed.emit()
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key_Delete:
-            self._on_delete_clicked()
+            selected_items = self._table.selectedItems()
+            if not selected_items:
+                return
+
+            rows = set()
+            for item in selected_items:
+                rows.add(item.row())
+
+            is_full_row_delete = True
+            for r in rows:
+                for c in range(3, self._table.columnCount()): # Check only text cols
+                    if self._table.item(r, c) not in selected_items:
+                        is_full_row_delete = False
+                        break
+                if not is_full_row_delete: break
+            
+            if is_full_row_delete:
+                self._on_delete_clicked()
+            else:
+                self._table.blockSignals(True)
+                for item in selected_items:
+                    item.setText("")
+                self._table.blockSignals(False)
+                self.changed.emit()
+        elif event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+            self._on_add_clicked()
         else:
             super().keyPressEvent(event)

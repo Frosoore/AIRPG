@@ -22,12 +22,24 @@ ID              : UUID string, generated per chunk
 import uuid
 from typing import Any
 
-import chromadb
-from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+# Lazy imports for heavy libraries
+# import chromadb
+# from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
 
 _COLLECTION_NAME: str = "narrative_memory"
 _EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
+
+class _EmbeddingSingleton:
+    """Ensures we only load the heavy transformer model once per session."""
+    _instance = None
+
+    @classmethod
+    def get(cls):
+        if cls._instance is None:
+            from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+            cls._instance = SentenceTransformerEmbeddingFunction(model_name=_EMBEDDING_MODEL)
+        return cls._instance
 
 
 class VectorMemory:
@@ -40,13 +52,19 @@ class VectorMemory:
 
     def __init__(self, persist_dir: str) -> None:
         self._persist_dir = persist_dir
-        self._embedding_fn = SentenceTransformerEmbeddingFunction(
-            model_name=_EMBEDDING_MODEL,
-        )
-        self._chroma_client = chromadb.PersistentClient(path=persist_dir)
+        self._chroma_client = None
+        self._collection = None
+
+    def _ensure_connected(self) -> None:
+        """Lazy-init ChromaDB only when first used."""
+        if self._collection is not None:
+            return
+
+        import chromadb
+        self._chroma_client = chromadb.PersistentClient(path=self._persist_dir)
         self._collection = self._chroma_client.get_or_create_collection(
             name=_COLLECTION_NAME,
-            embedding_function=self._embedding_fn,
+            embedding_function=_EmbeddingSingleton.get(),
         )
 
     # ------------------------------------------------------------------
@@ -60,24 +78,11 @@ class VectorMemory:
         text: str,
         chunk_type: str = "narrative",
     ) -> str:
-        """Embed a text chunk and store it with turn_id metadata.
-
-        Args:
-            save_id:    The save this chunk belongs to.
-            turn_id:    The narrative turn at which this chunk was produced.
-            text:       The text to embed.  Must be non-empty.
-            chunk_type: Category tag (e.g. "narrative", "lore", "dialogue").
-                        Defaults to "narrative".
-
-        Returns:
-            The document ID (UUID string) assigned to this chunk.
-
-        Raises:
-            ValueError: If text is empty or whitespace-only.
-        """
+        """Embed a text chunk and store it with turn_id metadata."""
         if not text or not text.strip():
             raise ValueError("Cannot embed empty or whitespace-only text.")
 
+        self._ensure_connected()
         doc_id = str(uuid.uuid4())
         self._collection.add(
             documents=[text],
@@ -98,30 +103,11 @@ class VectorMemory:
         current_turn_id: int | None = None,
         max_turn_id: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Retrieve the top-k most relevant chunks using Time-Weighted search.
-
-        Points:
-        1. Semantic similarity (ChromaDB distance) is the primary signal.
-        2. Recency weight: Non-lore chunks are penalized as they get older
-           relative to current_turn_id.
-        3. Lore immunity: Chunks with chunk_type='lore' (or turn_id=0) are
-           never penalized by time.
-
-        Args:
-            save_id:         Only chunks for this save are considered.
-            query_text:      The query string.
-            k:               Final number of results to return.
-            current_turn_id: The active turn number. If None, no time-weighting
-                             is applied (only distance).
-            max_turn_id:     Optional upper bound for turn_id. Chunks with
-                             turn_id > max_turn_id will be excluded (unless lore).
-
-        Returns:
-            List of result dicts, sorted by final weighted score (descending).
-        """
+        """Retrieve the top-k most relevant chunks using Time-Weighted search."""
         if not query_text or not query_text.strip():
             raise ValueError("Query text must not be empty.")
 
+        self._ensure_connected()
         # Fetch more candidates than k to allow for re-ranking
         candidate_count = max(k * 3, 20)
         
@@ -185,19 +171,8 @@ class VectorMemory:
         return candidates[:k]
 
     def rollback(self, save_id: str, target_turn_id: int) -> int:
-        """Delete all chunks for a save with turn_id strictly greater than target.
-
-        This is the destructive rollback required when rewinding to a previous
-        checkpoint.  Chunks at or before target_turn_id are preserved.
-
-        Args:
-            save_id:        The save whose future chunks are erased.
-            target_turn_id: The turn to revert to (inclusive).  All chunks
-                            with turn_id > target_turn_id are deleted.
-
-        Returns:
-            The number of chunks deleted.
-        """
+        """Delete all chunks for a save with turn_id strictly greater than target."""
+        self._ensure_connected()
         # ChromaDB's $gt operator requires a numeric type
         result = self._collection.get(
             where={

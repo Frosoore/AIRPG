@@ -372,21 +372,26 @@ The specific scenario from the spec — "click Add Entity, type 'Gojo', click Sa
 
 ---
 
-## [PHASE 15 | 2026-04-16] — LLM Optimization (7B/8B Support) (Complete)
+## [PHASE 17 | 2026-05-03] — Comeback Rework & UX Excellence (Complete)
 
-### 15.1 — Prompt Flattening & Compression
-- Consolidated multiple system instruction blocks into a single "Narrator Rules" block to reduce context overhead and focus model attention.
-- Simplified formatting and length directives.
+### UI/UX: Spreadsheet-like Interaction
+- **Bulk Editing:** Implemented multi-cell synchronization. Changing one cell while others are selected in the same column propagates the change to all selected items (Entities, Stats, Rules, Lore).
+- **Smart Selection:** Switched all tables to `SelectItems` with `ExtendedSelection` for precise multi-cell control.
+- **Smart Deletion:** `Delete` key now intelligently clears cell contents if partial rows are selected, or deletes entire records if full rows are targeted.
 
-### 15.2 — Schema Simplification
-- Reduced `NARRATIVE_TOOL_CALL_SCHEMA` to a minimal JSON structure, making it highly resilient for small local models (7B/8B).
-- Condensed secondary rules (Factions, Inventory) into concise instructions.
+### Keyboard-First Workflow
+- **Global Shortcuts:** Added `Ctrl+S` (Save), `Ctrl+1` through `Ctrl+7` (Tab navigation).
+- **Tabular Navigation:** Full support for `Tab` / `Shift+Tab` and `Arrow` keys across all spreadsheet editors.
+- **Fluid Saisie:** "Write-before-Add" pattern perfected—pressing `Enter` in input fields adds the entry and returns focus to the starting field for rapid data entry.
 
-### 15.3 — Narrative Correction Loop
-- Replaced technical "[SYSTEM CORRECTION]" prompts with soft "[NARRATOR HINT]" instructions to prevent models from hallucinating errors in dialogue.
-- Rewrote validation error messages to be narrative-friendly.
+### Creator Studio Overhaul
+- **Entity Editor:** Replaced "Add All Stats" with a `MultiStatSelectionDialog`, allowing selective bulk addition via checkboxes.
+- **Rule Editor:** Strict validation via `QComboBox` for stat keys. No more free-text "stat key" fields to prevent broken rule logic.
+- **Lore Book:** Added "Populate ✨" button for AI-generated lore. Implemented explicit category management with a "New Category" flow.
+- **Scheduled Events:** Full "Custom Calendar" support. Users can now define custom month names and precise "Adventure Start" days. Dynamic time preview in the editor.
 
-### 15.4 — Context Window Pruning
-- Implemented NPC density limiting in `Arbitrator`: only the 3 most relevant background NPCs at the player's location are included in the prompt.
-- Improved mention-based detection to prioritize entities discussed in recent history.
+### Deployment & Bug Fixes
+- **SVG Icon Fix:** `run.sh` now detects missing `libqt6svg6` system libraries.
+- **Absolute Pathing:** Corrected icon resolution logic in `airpg.desktop` for better global installation compatibility.
+- **ASCII Aesthetic:** Finalized the removal of emojis and non-standard typography for a cleaner "Senior Engineer" monospaced look.
 

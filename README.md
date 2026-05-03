@@ -69,6 +69,19 @@ Traditionally, AI-driven games suffer from "hallucinations" where the AI ignores
    - **Local (Recommended):** Set up Ollama with `ollama pull llama3.2`.
    - **Cloud:** Enter your Gemini API key.
 
+## Key Features
+
+- **Dual-Agent Architecture:** An *Arbitrator* (deterministic rule-enforcer) and a *Chronicler* (macro-world simulator) work together to keep the story grounded.
+- **Event Sourcing:** Every game event is logged. Rewind any session to any previous turn with perfect state reconstruction.
+- **Spreadsheet Studio:** Powerful universe creator with bulk-editing, keyboard navigation, and AI-assisted population.
+- **Custom Calendars:** Define your own time systems, month names, and adventure start dates.
+- **Vector Memory (RAG):** Local semantic search via ChromaDB for infinite lore and narrative consistency.
+- **Hardcore Mode:** True stakes—character death triggers permanent file deletion and memory wipe.
+- **Architecture Optimized:**
+    - **Lazy-Loading:** Heavy AI libraries (ChromaDB, Transformers) only load when needed, saving RAM on startup.
+    - **Snapshots:** 20-turn snapshots for near-instant state reconstruction in long campaigns.
+    - **Context Pruning:** Heuristic entity filtering to support small local models (7B/8B) without context overflow.
+
 ---
 
 ## Architecture Overview
@@ -77,6 +90,7 @@ Traditionally, AI-driven games suffer from "hallucinations" where the AI ignores
 - **The Chronicler:** A background agent that performs "World Turns" every X player turns to update the macro-state of the universe.
 - **Mini-Dico:** A secondary, RAG-powered chat for lore lookups that is strictly siloed from the main narrative to prevent context contamination.
 - **Snapshot System:** Efficient state recovery using periodic snapshots of the event stream.
+- **Lazy I/O:** All database and AI operations run in dedicated QThread workers to keep the UI responsive at all times.
 
 ---
 
