@@ -194,14 +194,14 @@ class LLMBackend(ABC):
     # Shared parsing logic (concrete, inherited by all subclasses)
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def parse_tool_call(raw_response: str) -> tuple[str, dict | None]:
+    @classmethod
+    def parse_tool_call(cls, raw_response: str) -> tuple[str, dict | list | None]:
         """Extract narrative text and tool-call JSON from a raw LLM response.
 
         Resilient parsing:
         1. Checks for common markdown fences (~~~json, ```json, etc).
-        2. Fallback: Iterative brace counting to find the FIRST valid JSON object.
-        3. Cleans the JSON string and attempts to parse.
+        2. Fallback: Heuristic search for JSON objects {...} or arrays [...].
+        3. Normalizes minor schema deviations (e.g., missing 'stats' key or flat params).
 
         Args:
             raw_response: The complete raw string returned by the LLM.
@@ -209,12 +209,8 @@ class LLMBackend(ABC):
         Returns:
             A tuple (narrative_text, tool_call) where:
             - narrative_text is the response with the JSON block removed.
-            - tool_call is the parsed dict, or None if no valid JSON was found.
+            - tool_call is the parsed dict/list, or None if no valid JSON was found.
         """
-        json_str: str | None = None
-        start_idx: int = -1
-        end_idx: int = -1
-
         # 1. Try fenced blocks first (prioritize ~~~json as per spec)
         for pattern in _FENCE_PATTERNS:
             match = pattern.search(raw_response)
@@ -222,33 +218,55 @@ class LLMBackend(ABC):
                 json_str = match.group(1).strip()
                 narrative = pattern.sub("", raw_response).strip()
                 try:
-                    return narrative, json.loads(json_str)
+                    data = json.loads(json_str)
+                    return narrative, cls._normalize_json(data)
                 except json.JSONDecodeError as exc:
-                    # If fence exists but is totally invalid, raise LLMParseError
-                    # as expected by some tests.
                     raise LLMParseError(f"Failed to parse tool-call JSON block: {exc}") from exc
 
-        # 2. Fallback: Iterative brace counting
-        # We look for the first '{' and find its matching '}'
-        stack = []
-        for i, char in enumerate(raw_response):
-            if char == "{":
-                if not stack:
-                    start_idx = i
-                stack.append("{")
-            elif char == "}":
-                if stack:
-                    stack.pop()
-                    if not stack:
-                        end_idx = i + 1
-                        break
-        
-        if start_idx != -1 and end_idx != -1:
-            json_str = raw_response[start_idx:end_idx]
+        # 2. Fallback: Heuristic search for largest JSON-looking block
+        # Support both objects {...} and arrays [...]
+        json_pattern = re.compile(r"([\{\[].*[\}\]])", re.DOTALL)
+        match = json_pattern.search(raw_response)
+        if match:
+            json_str = match.group(1).strip()
+            start_idx = raw_response.find(json_str)
+            end_idx = start_idx + len(json_str)
             narrative = (raw_response[:start_idx] + raw_response[end_idx:]).strip()
             try:
-                return narrative, json.loads(json_str)
+                data = json.loads(json_str)
+                return narrative, cls._normalize_json(data)
             except json.JSONDecodeError:
                 pass
 
         return raw_response.strip(), None
+
+    @classmethod
+    def _normalize_json(cls, data: Any) -> dict | list | None:
+        """Heuristically fix common LLM deviations from requested schemas."""
+        if isinstance(data, list):
+            # If they gave a list directly (common in 'populate stats'), we normalize items
+            return [cls._normalize_item(i) for i in data]
+        
+        if isinstance(data, dict):
+            # If they wrapped it in 'stats', 'entities', etc., normalize the contents
+            for key in ["stats", "entities", "rules", "lore_book", "scheduled_events"]:
+                if key in data and isinstance(data[key], list):
+                    data[key] = [cls._normalize_item(i) for i in data[key]]
+            return data
+            
+        return data
+
+    @classmethod
+    def _normalize_item(cls, item: Any) -> Any:
+        """Fix a single stat/entity/rule item."""
+        if not isinstance(item, dict):
+            return item
+            
+        # Fix categorical stats where parameters is a list instead of {"options": [...]}
+        # Log showed: "parameters": ["Villager", "Adventurer", ...]
+        if item.get("value_type") == "categorical":
+            params = item.get("parameters")
+            if isinstance(params, list):
+                item["parameters"] = {"options": params}
+        
+        return item

@@ -15,7 +15,7 @@ import httpx
 
 from llm_engine.base import LLMBackend, LLMConnectionError, LLMMessage, LLMResponse
 
-_DEFAULT_TIMEOUT: float = 120.0
+_DEFAULT_TIMEOUT: float = 600.0
 
 
 class UniversalClient(LLMBackend):

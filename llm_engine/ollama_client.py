@@ -31,7 +31,7 @@ from llm_engine.base import (
 )
 
 _DEFAULT_BASE_URL: str = "http://localhost:11434"
-_REQUEST_TIMEOUT: float = 120.0  # seconds
+_REQUEST_TIMEOUT: float = 600.0  # seconds
 
 
 class OllamaClient(LLMBackend):

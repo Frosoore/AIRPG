@@ -325,5 +325,5 @@ class CreatorStudioView(QWidget):
 
     @Slot(str)
     def _on_worker_error(self, message: str) -> None:
-        self._pending_ai_task = None
+        self._pending_ai_tasks = []
         QMessageBox.critical(self, tr("error"), message)

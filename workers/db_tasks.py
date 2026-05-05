@@ -265,26 +265,23 @@ class PopulateMetaTask(BaseDbTask):
         prompt = build_populate_meta_prompt(current_meta, 
                                             custom_instruction=self.custom_text if self.mode == "custom" else None)
         
-        try:
-            resp = llm.complete(prompt, response_format="json")
-            data = resp.tool_call if isinstance(resp.tool_call, dict) else {}
-            
-            if data:
-                with get_connection(self.db_path) as conn:
-                    if "universe_name" in data:
-                        conn.execute("INSERT OR REPLACE INTO Universe_Meta (key, value) VALUES ('universe_name', ?);", (data["universe_name"],))
-                    if "global_lore" in data:
-                        conn.execute("INSERT OR REPLACE INTO Universe_Meta (key, value) VALUES ('global_lore', ?);", (data["global_lore"],))
-                    if "system_prompt" in data:
-                        conn.execute("INSERT OR REPLACE INTO Universe_Meta (key, value) VALUES ('system_prompt', ?);", (data["system_prompt"],))
-                    if "first_message" in data:
-                        conn.execute("INSERT OR REPLACE INTO Universe_Meta (key, value) VALUES ('first_message', ?);", (data["first_message"],))
-                    conn.commit()
-                self.signals.status.emit("Metadata refinement complete.")
-                return True
-        except Exception as e:
-            print(f"[POPULATE_META] Error: {e}")
+        resp = llm.complete(prompt, response_format="json")
+        data = resp.tool_call if isinstance(resp.tool_call, dict) else {}
         
+        if data:
+            with get_connection(self.db_path) as conn:
+                if "universe_name" in data:
+                    conn.execute("INSERT OR REPLACE INTO Universe_Meta (key, value) VALUES ('universe_name', ?);", (data["universe_name"],))
+                if "global_lore" in data:
+                    conn.execute("INSERT OR REPLACE INTO Universe_Meta (key, value) VALUES ('global_lore', ?);", (data["global_lore"],))
+                if "system_prompt" in data:
+                    conn.execute("INSERT OR REPLACE INTO Universe_Meta (key, value) VALUES ('system_prompt', ?);", (data["system_prompt"],))
+                if "first_message" in data:
+                    conn.execute("INSERT OR REPLACE INTO Universe_Meta (key, value) VALUES ('first_message', ?);", (data["first_message"],))
+                conn.commit()
+            self.signals.status.emit("Metadata refinement complete.")
+            return True
+    
         return False
 
 class PopulateStatsTask(BaseDbTask):
@@ -299,11 +296,7 @@ class PopulateStatsTask(BaseDbTask):
         from llm_engine.prompt_builder import build_populate_stats_prompt
         
         cfg = load_config()
-        try:
-            llm = build_llm_from_config(cfg, model_override=cfg.extraction_model)
-        except Exception as e:
-            print(f"[POPULATE_STATS] Failed to build LLM backend: {e}")
-            return 0
+        llm = build_llm_from_config(cfg, model_override=cfg.extraction_model)
             
         with get_connection(self.db_path) as conn:
             row = conn.execute("SELECT value FROM Universe_Meta WHERE key = 'global_lore';").fetchone()
@@ -315,27 +308,34 @@ class PopulateStatsTask(BaseDbTask):
         prompt = build_populate_stats_prompt(global_lore, existing_stats, 
                                              custom_instruction=self.custom_text if self.mode == "custom" else None)
         
-        try:
-            resp = llm.complete(prompt, response_format="json")
-            batch = []
-            if isinstance(resp.tool_call, dict):
-                batch = resp.tool_call.get("stats", [])
-            
-            inserted = 0
-            if batch:
-                with get_connection(self.db_path) as conn:
-                    for s in batch:
-                        if s.get("name") and s["name"] not in existing_stats:
-                            conn.execute(
-                                "INSERT INTO Stat_Definitions (name, description, value_type, parameters) VALUES (?, ?, ?, ?);",
-                                (s["name"], s.get("description", ""), s.get("value_type", "numeric"), json.dumps(s.get("parameters", {})))
-                            )
-                            inserted += 1
-                    conn.commit()
-                self.signals.status.emit(f"Stats generation complete: {inserted} added.")
-                return inserted
-        except Exception as e:
-            print(f"[POPULATE_STATS] Error: {e}")
+        resp = llm.complete(prompt, response_format="json")
+        data = resp.tool_call
+        
+        # Heuristic: support both wrapped and raw lists
+        batch = []
+        if isinstance(data, list):
+            batch = data
+        elif isinstance(data, dict):
+            batch = data.get("stats", [])
+        
+        inserted = 0
+        if batch:
+            import uuid
+            with get_connection(self.db_path) as conn:
+                for s in batch:
+                    name = s.get("name")
+                    if name and name not in existing_stats:
+                        stat_id = re.sub(r'[^a-z0-9]', '_', name.lower()).strip('_')
+                        if not stat_id: stat_id = uuid.uuid4().hex[:8]
+                        
+                        conn.execute(
+                            "INSERT INTO Stat_Definitions (stat_id, name, description, value_type, parameters) VALUES (?, ?, ?, ?, ?);",
+                            (stat_id, name, s.get("description", ""), s.get("value_type", "numeric"), json.dumps(s.get("parameters", {})))
+                        )
+                        inserted += 1
+                conn.commit()
+            self.signals.status.emit(f"Stats generation complete: {inserted} added.")
+            return inserted
         
         return 0
 
@@ -351,10 +351,7 @@ class PopulateRulesTask(BaseDbTask):
         from llm_engine.prompt_builder import build_populate_rules_prompt
         
         cfg = load_config()
-        try:
-            llm = build_llm_from_config(cfg, model_override=cfg.extraction_model)
-        except Exception as e:
-            return 0
+        llm = build_llm_from_config(cfg, model_override=cfg.extraction_model)
             
         with get_connection(self.db_path) as conn:
             row = conn.execute("SELECT value FROM Universe_Meta WHERE key = 'global_lore';").fetchone()
@@ -368,26 +365,30 @@ class PopulateRulesTask(BaseDbTask):
         prompt = build_populate_rules_prompt(global_lore, stat_names, existing_rules, 
                                               custom_instruction=self.custom_text if self.mode == "custom" else None)
         
-        try:
-            resp = llm.complete(prompt, response_format="json")
-            batch = []
-            if isinstance(resp.tool_call, dict):
-                batch = resp.tool_call.get("rules", [])
-            
-            inserted = 0
-            if batch:
-                with get_connection(self.db_path) as conn:
-                    for r in batch:
-                        if r.get("rule_id") and r["rule_id"] not in existing_rules:
-                            conn.execute(
-                                "INSERT INTO Rules (rule_id, priority, conditions_json, actions_json) VALUES (?, ?, ?, ?);",
-                                (r["rule_id"], r.get("priority", 10), json.dumps(r.get("conditions", [])), json.dumps(r.get("actions", [])))
-                            )
-                            inserted += 1
-                    conn.commit()
-                return inserted
-        except Exception as e:
-            pass
+        resp = llm.complete(prompt, response_format="json")
+        data = resp.tool_call
+        
+        batch = []
+        if isinstance(data, list): batch = data
+        elif isinstance(data, dict):
+            batch = data.get("rules", [])
+        
+        inserted = 0
+        if batch:
+            import uuid
+            with get_connection(self.db_path) as conn:
+                for r in batch:
+                    rule_id = r.get("rule_id")
+                    if not rule_id: rule_id = uuid.uuid4().hex[:8]
+                    
+                    if rule_id not in existing_rules:
+                        conn.execute(
+                            "INSERT INTO Rules (rule_id, priority, conditions, actions, target_entity) VALUES (?, ?, ?, ?, ?);",
+                            (rule_id, r.get("priority", 0), json.dumps(r.get("conditions", {})), json.dumps(r.get("actions", [])), r.get("target_entity", "*"))
+                        )
+                        inserted += 1
+                conn.commit()
+            return inserted
         return 0
 
 class PopulateEventsTask(BaseDbTask):
@@ -402,10 +403,7 @@ class PopulateEventsTask(BaseDbTask):
         from llm_engine.prompt_builder import build_populate_events_prompt
         
         cfg = load_config()
-        try:
-            llm = build_llm_from_config(cfg, model_override=cfg.extraction_model)
-        except Exception as e:
-            return 0
+        llm = build_llm_from_config(cfg, model_override=cfg.extraction_model)
             
         with get_connection(self.db_path) as conn:
             row = conn.execute("SELECT value FROM Universe_Meta WHERE key = 'global_lore';").fetchone()
@@ -417,25 +415,32 @@ class PopulateEventsTask(BaseDbTask):
         prompt = build_populate_events_prompt(global_lore, existing_events, 
                                               custom_instruction=self.custom_text if self.mode == "custom" else None)
         
-        try:
-            resp = llm.complete(prompt, response_format="json")
-            batch = []
-            if isinstance(resp.tool_call, dict):
-                batch = resp.tool_call.get("events", [])
-            
-            inserted = 0
-            if batch:
-                with get_connection(self.db_path) as conn:
-                    for ev in batch:
-                        conn.execute(
-                            "INSERT INTO Scheduled_Events (title, description, trigger_minute) VALUES (?, ?, ?);",
-                            (ev.get("title", "Event"), ev.get("description", ""), ev.get("trigger_minute", 0))
-                        )
-                        inserted += 1
-                    conn.commit()
-                return inserted
-        except Exception as e:
-            pass
+        resp = llm.complete(prompt, response_format="json")
+        data = resp.tool_call
+        
+        batch = []
+        if isinstance(data, list): batch = data
+        elif isinstance(data, dict):
+            batch = data.get("events", [])
+        
+        inserted = 0
+        if batch:
+            import uuid
+            with get_connection(self.db_path) as conn:
+                for ev in batch:
+                    event_id = ev.get("event_id")
+                    if not event_id:
+                        title = ev.get("title", "event")
+                        event_id = re.sub(r'[^a-z0-9]', '_', title.lower()).strip('_')
+                        if not event_id: event_id = uuid.uuid4().hex[:8]
+                    
+                    conn.execute(
+                        "INSERT INTO Scheduled_Events (event_id, title, description, trigger_minute) VALUES (?, ?, ?, ?);",
+                        (event_id, ev.get("title", "Event"), ev.get("description", ""), ev.get("trigger_minute", 0))
+                    )
+                    inserted += 1
+                conn.commit()
+            return inserted
         return 0
 
 class PopulateEntitiesTask(BaseDbTask):
@@ -455,12 +460,7 @@ class PopulateEntitiesTask(BaseDbTask):
         
         self.signals.status.emit("Initializing AI backend...")
         cfg = load_config()
-        # Use specialized model for extraction, respecting user backend (Universal/Kobold/Gemini)
-        try:
-            llm = build_llm_from_config(cfg, model_override=cfg.extraction_model)
-        except Exception as e:
-            print(f"[POPULATE] Failed to build LLM backend: {e}")
-            return 0
+        llm = build_llm_from_config(cfg, model_override=cfg.extraction_model)
         
         # 1. Gather context
         self.signals.status.emit("Gathering context...")
@@ -519,35 +519,34 @@ class PopulateEntitiesTask(BaseDbTask):
             prompt = build_populate_prompt(chunk, existing_names, stat_defs,
                                            custom_instruction=self.custom_text if self.mode == "custom" else None)
             
-            try:
-                # Force JSON format at the API level
-                resp = llm.complete(prompt, response_format="json")
-                
-                # Resilient JSON parsing
-                batch = []
-                if isinstance(resp.tool_call, list):
-                    batch = resp.tool_call
-                elif isinstance(resp.tool_call, dict):
-                    if "entities" in resp.tool_call:
-                        batch = resp.tool_call["entities"]
-                    else:
-                        batch = [resp.tool_call]
-                
-                if isinstance(batch, list):
-                    # Filter stats to ensure only defined ones are kept
-                    allowed_stats = {s["name"].lower() for s in stat_defs}
-                    for ent in batch:
-                        if "stats" in ent and isinstance(ent["stats"], dict):
-                            valid_stats = {}
-                            stat_name_map = {s["name"].lower(): s["name"] for s in stat_defs}
-                            for k, v in ent["stats"].items():
-                                if k.lower() in allowed_stats:
-                                    valid_stats[stat_name_map[k.lower()]] = v
-                            ent["stats"] = valid_stats
-                    new_entities_found.extend(batch)
-            except Exception as e:
-                print(f"[POPULATE] LLM error on chunk {i}: {e}")
-                continue
+            # Force JSON format at the API level
+            resp = llm.complete(prompt, response_format="json")
+            
+            # Resilient JSON parsing
+            data = resp.tool_call
+            
+            batch = []
+            if isinstance(data, list):
+                batch = data
+            elif isinstance(data, dict):
+                if "entities" in data:
+                    batch = data["entities"]
+                else:
+                    # Fallback for single object return
+                    batch = [data]
+            
+            if isinstance(batch, list):
+                # Filter stats to ensure only defined ones are kept
+                allowed_stats = {s["name"].lower() for s in stat_defs}
+                for ent in batch:
+                    if "stats" in ent and isinstance(ent["stats"], dict):
+                        valid_stats = {}
+                        stat_name_map = {s["name"].lower(): s["name"] for s in stat_defs}
+                        for k, v in ent["stats"].items():
+                            if k.lower() in allowed_stats:
+                                valid_stats[stat_name_map[k.lower()]] = v
+                        ent["stats"] = valid_stats
+                new_entities_found.extend(batch)
 
         # 4. Filter and Insert
         self.signals.status.emit("Finalizing new entities...")
@@ -603,11 +602,7 @@ class PopulateLoreTask(BaseDbTask):
         
         self.signals.status.emit("Initializing AI backend...")
         cfg = load_config()
-        try:
-            llm = build_llm_from_config(cfg, model_override=cfg.extraction_model)
-        except Exception as e:
-            print(f"[POPULATE_LORE] Failed to build LLM backend: {e}")
-            return 0
+        llm = build_llm_from_config(cfg, model_override=cfg.extraction_model)
             
         with get_connection(self.db_path) as conn:
             row = conn.execute("SELECT value FROM Universe_Meta WHERE key = 'global_lore';").fetchone()
@@ -619,35 +614,32 @@ class PopulateLoreTask(BaseDbTask):
         prompt = build_populate_lore_prompt(global_lore, existing_entries, 
                                             custom_instruction=self.custom_text if self.mode == "custom" else None)
         
-        try:
-            resp = llm.complete(prompt, response_format="json")
-            batch = []
-            if isinstance(resp.tool_call, list): batch = resp.tool_call
-            elif isinstance(resp.tool_call, dict):
-                batch = resp.tool_call.get("lore_entries", [resp.tool_call] if "name" in resp.tool_call else [])
-            
-            inserted = 0
-            if batch:
-                with get_connection(self.db_path) as conn:
-                    for entry in batch:
-                        if entry.get("name") and entry["name"] not in existing_entries:
-                            conn.execute(
-                                "INSERT INTO Lore_Book (entry_id, category, name, content) VALUES (?, ?, ?, ?);",
-                                (uuid.uuid4().hex, entry.get("category", "General"), entry["name"], entry.get("content", ""))
-                            )
-                            inserted += 1
-                    conn.commit()
-                self.signals.status.emit(f"Lore expansion complete: {inserted} entries added.")
-                return inserted
-        except Exception as e:
-            print(f"[POPULATE_LORE] Error: {e}")
+        resp = llm.complete(prompt, response_format="json")
+        data = resp.tool_call
+        
+        batch = []
+        if isinstance(data, list): batch = data
+        elif isinstance(data, dict):
+            batch = data.get("lore_entries", [data] if "name" in data else [])
+        
+        inserted = 0
+        if batch:
+            import uuid
+            with get_connection(self.db_path) as conn:
+                for entry in batch:
+                    name = entry.get("name")
+                    if name and name not in existing_entries:
+                        conn.execute(
+                            "INSERT INTO Lore_Book (entry_id, category, name, content) VALUES (?, ?, ?, ?);",
+                            (uuid.uuid4().hex, entry.get("category", "General"), name, entry.get("content", ""))
+                        )
+                        inserted += 1
+                conn.commit()
+            self.signals.status.emit(f"Lore expansion complete: {inserted} entries added.")
+            return inserted
         
         self.signals.status.emit("Lore expansion complete: No new entries added.")
         return 0
-
-        self.signals.status.emit(f"Populate complete: {inserted_count} entities added.")
-        return inserted_count
-
 
 class CreatePlayerEntityTask(BaseDbTask):
     """Creates a new entity of type 'player' with initial stats."""
