@@ -33,7 +33,7 @@ import json
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Iterator, TypedDict, NotRequired
+from typing import Any, Iterator, TypedDict, NotRequired
 
 
 # ---------------------------------------------------------------------------
