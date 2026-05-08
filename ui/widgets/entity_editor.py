@@ -301,7 +301,16 @@ class EntityEditorWidget(QWidget):
         if vtype == "numeric":
             spin = QDoubleSpinBox()
             spin.setRange(float(params.get("min", -999999)), float(params.get("max", 999999)))
-            val = float(initial_val) if initial_val not in (None, "") else float(params.get("min", 0))
+            
+            # Robust conversion
+            try:
+                if initial_val in (None, "", "{}"):
+                    val = float(params.get("min", 0))
+                else:
+                    val = float(initial_val)
+            except (ValueError, TypeError):
+                val = float(params.get("min", 0))
+                
             spin.setValue(val)
             self._stats_table.setCellWidget(row, 1, spin)
         elif vtype == "categorical":

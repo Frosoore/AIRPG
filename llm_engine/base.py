@@ -60,12 +60,12 @@ class LLMResponse:
     Attributes:
         narrative_text: The prose portion of the response, with the
                         ~~~json … ~~~ block stripped out.
-        tool_call:      The parsed JSON object from the fenced block, or
-                        None if the LLM produced no tool call.
+        tool_call:      The parsed JSON object or list from the fenced block, 
+                        or None if the LLM produced no tool call.
         finish_reason:  One of "stop", "length", or "error".
     """
     narrative_text: str
-    tool_call: dict | None
+    tool_call: dict | list | None
     finish_reason: str
 
 

@@ -166,14 +166,14 @@ class DbWorker(QObject):
     def populate_entities(self, mode: str = "auto", custom_text: str | None = None) -> None:
         """AI-driven entity generation (asynchronous)."""
         task = PopulateEntitiesTask(self._db_path, mode, custom_text)
-        task.signals.result.connect(lambda _: self.load_entities_and_rules())
+        task.signals.result.connect(lambda _: self.load_full_universe())
         self._setup_task(task)
 
     def populate_lore(self, mode: str = "auto", custom_text: str | None = None) -> None:
         """AI-driven lore book generation (asynchronous)."""
         from workers.db_tasks import PopulateLoreTask
         task = PopulateLoreTask(self._db_path, mode, custom_text)
-        task.signals.result.connect(lambda _: self.load_entities_and_rules())
+        task.signals.result.connect(lambda _: self.load_full_universe())
         self._setup_task(task)
 
     def populate_meta(self, mode: str = "auto", custom_text: str | None = None) -> None:
