@@ -373,10 +373,11 @@ class ArbitratorEngine:
         if narrative_text.strip():
             self._vector_memory.embed_chunk(save_id, turn_id, narrative_text)
 
-        # Step 11 — Log narrative event
+        # Step 11 — Log narrative event (Multiverse-compatible)
+        text_to_log = user_message if not narrative_text.strip() else narrative_text
         self._event_sourcer.append_event(
             save_id, turn_id, "narrative_text", "player",
-            {"text": user_message if not narrative_text.strip() else narrative_text} # Fallback for empty narrative
+            {"active": 0, "variants": [text_to_log]}
         )
 
         # Phase 12.1: Mark scheduled events as fired

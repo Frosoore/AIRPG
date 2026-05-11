@@ -87,6 +87,7 @@ class TabletopView(HardcoreMixin, QWidget):
         self._first_message: str = ""
         self._first_message_shown: bool = False
         self._player_persona: str = ""
+        self._setup_answers: dict[str, str] = {}
         self._history: list = []
         self._lore_book: list[dict] = []
         self._llm_temperature: float = 0.7
@@ -257,17 +258,22 @@ class TabletopView(HardcoreMixin, QWidget):
         db_path: str,
         save_id: str,
         player_persona: str = "",
+        setup_answers: dict[str, str] | None = None,
     ) -> None:
         """Initialise the tabletop session; constructs workers, never blocks the UI."""
         self._db_path = db_path
         self._save_id = save_id
-        # We no longer reset _turn_id and _history to 0/empty here; 
+        # We no longer reset _turn_id and _history to 0/empty here;
         # the DB task load_session_history will provide them.
         self._last_chronicle_time = 0
         self._player_persona = player_persona
+        self._setup_answers = setup_answers or {}
         self._global_lore = ""
         self._lore_book = []
         self._first_message_shown = False
+
+        # Synchronise time from DB BEFORE other async loads
+        self._resume_turn_id()
 
         # Reset loading state
         self._db_loaded = False
@@ -303,9 +309,6 @@ class TabletopView(HardcoreMixin, QWidget):
         self._db_worker.load_session_history(save_id)
         self._db_worker.load_full_universe() # Fetch lore_book + entities
         
-        # Synchronise time from DB
-        self._resume_turn_id()
-
     def reload_llm(self) -> None:
         """Construct a fresh LLM instance from the latest settings.json."""
         if not self._db_path:
@@ -358,6 +361,9 @@ class TabletopView(HardcoreMixin, QWidget):
         # Load Calendar
         cal_str = meta.get("calendar_config", "{}")
         self._time_system = TimeSystem(CalendarConfig.from_json(cal_str))
+        
+        # Refresh UI time label with potentially new calendar config
+        self._time_label.setText(self._format_time(self._current_time))
         
         try:
             self._llm_temperature = float(meta.get("llm_temperature", "0.7"))
@@ -453,14 +459,26 @@ class TabletopView(HardcoreMixin, QWidget):
         if not variants:
             variants = [self._first_message.strip()]
             
+        # Phase 11: Story Setup Tag Replacement (Case-insensitive, all variants)
+        if self._setup_answers:
+            for i in range(len(variants)):
+                v = variants[i]
+                for key, val in self._setup_answers.items():
+                    # Case-insensitive replacement of @id
+                    pattern = re.compile(f"@{re.escape(key)}", re.IGNORECASE)
+                    v = pattern.sub(val, v)
+                variants[i] = v
+
         active_idx = random.randint(0, len(variants) - 1)
+        chosen = variants[active_idx]
+        
         payload = {
             "active": active_idx,
             "variants": variants
         }
         
         self._chat.append_assistant_separator()
-        self._chat.append_token(variants[active_idx])
+        self._chat.append_token(chosen)
         self._chat.flush_final_buffer()
         self._chat.append_variants_nav(0, active_idx, len(variants), is_latest=True)
         
@@ -551,11 +569,18 @@ class TabletopView(HardcoreMixin, QWidget):
         self._chat.flush_final_buffer()
 
         narrative_text = getattr(result, "narrative_text", "")
+        payload = {
+            "active": 0,
+            "variants": [narrative_text]
+        }
         self._history.append({
             "turn_id": self._turn_id,
             "event_type": "narrative_text",
-            "payload": narrative_text
+            "payload": payload
         })
+        
+        # Show variant navigation (Regenerate button)
+        self._chat.append_variants_nav(self._turn_id, 0, 1, is_latest=True)
 
         # Update Audio Ambiance
         game_state_tag = getattr(result, "game_state_tag", "exploration")
@@ -593,9 +618,7 @@ class TabletopView(HardcoreMixin, QWidget):
         self._chat.set_send_enabled(True)
         
         # Force a DB sync of the sidebar
-        self._db_worker.load_stats(self._save_id)
-        self._db_worker.load_inventory(self._save_id)
-        self._db_worker.load_timeline(self._save_id)
+        self._db_worker.load_full_game_state(self._save_id)
 
     @Slot(int, int)
     def _on_variant_requested(self, turn_id: int, variant_index: int) -> None:
@@ -618,17 +641,21 @@ class TabletopView(HardcoreMixin, QWidget):
         self._chat.set_send_enabled(False)
         self._main_window.on_status_update(tr("generating"))
         
-        # 1. Fetch the user action for this turn from history
-        # (This logic assumes history is linear and turn_id aligns)
+        # 1. Fetch the user action for this turn from history (Event-sourced format)
         user_action_text = ""
-        # Search backwards from the end of history
-        for i in range(len(self._history)-1, -1, -1):
-             if self._history[i]["role"] == "user":
-                 user_action_text = self._history[i]["content"]
-                 break
+        sub_history = []
+        
+        # Search for the user input that triggered this turn
+        for event in self._history:
+            if event.get("turn_id") == turn_id and event.get("event_type") == "user_input":
+                payload = event.get("payload", "")
+                user_action_text = payload.get("text", str(payload)) if isinstance(payload, dict) else str(payload)
+            
+            # Sub-history is everything BEFORE this turn
+            if event.get("turn_id") < turn_id:
+                sub_history.append(event)
                  
         if not user_action_text:
-             # Fallback: check DB if history lookup fails
              user_action_text = "..." 
 
         # 2. Run a special regenerate worker
@@ -649,12 +676,6 @@ class TabletopView(HardcoreMixin, QWidget):
             verbosity_level=self._llm_verbosity
         )
 
-        # Create sub-history (history UP TO this turn)
-        sub_history = []
-        # Complex turn_id mapping logic omitted for brevity, using full history as approximation
-        # for a simple 'regenerate last turn' implementation.
-        sub_history = self._history[:-1] # Remove the last assistant message
-
         self._regen_worker = RegenerateWorker(
             llm=self._llm,
             db_path=self._db_path,
@@ -668,7 +689,7 @@ class TabletopView(HardcoreMixin, QWidget):
             verbosity_level=self._llm_verbosity
         )
         self._regen_worker.token_received.connect(self._chat.append_token)
-        self._regen_worker.turn_complete.connect(self._on_turn_complete)
+        self._regen_worker.regenerate_complete.connect(self._refresh_after_variant_switch)
         self._regen_worker.error_occurred.connect(self._on_worker_error)
         self._regen_worker.start()
 

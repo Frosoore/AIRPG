@@ -31,6 +31,7 @@ from ui.widgets.lore_book_editor import LoreBookEditorWidget
 from ui.widgets.rule_editor import RuleEditorWidget
 from ui.widgets.stat_definition_editor import StatDefinitionEditorWidget
 from ui.widgets.scheduled_events_editor import ScheduledEventsEditorWidget
+from ui.widgets.story_setup_editor import StorySetupEditorWidget
 from ui.widgets.populate_tab import PopulateTabWidget
 from workers.db_worker import DbWorker
 from core.config import load_config
@@ -84,6 +85,7 @@ class CreatorStudioView(QWidget):
         self._stat_editor = StatDefinitionEditorWidget()
         self._lore_book_editor = LoreBookEditorWidget()
         self._scheduled_events_editor = ScheduledEventsEditorWidget()
+        self._story_setup_editor = StorySetupEditorWidget()
         self._populate_tab = PopulateTabWidget()
         
         self._tabs.addTab(self._build_lore_tab(), tr("tab_meta"))
@@ -91,6 +93,7 @@ class CreatorStudioView(QWidget):
         self._tabs.addTab(self._entity_editor, tr("tab_entities"))
         self._tabs.addTab(self._rule_editor, tr("tab_rules"))
         self._tabs.addTab(self._scheduled_events_editor, tr("tab_events"))
+        self._tabs.addTab(self._story_setup_editor, tr("tab_setup") if "tab_setup" in tr("ready") else "Story Setup")
         self._tabs.addTab(self._lore_book_editor, tr("tab_lore"))
         self._tabs.addTab(self._populate_tab, tr("populate"))
         layout.addWidget(self._tabs)
@@ -182,8 +185,9 @@ class CreatorStudioView(QWidget):
         self._tabs.setTabText(2, tr("tab_entities"))
         self._tabs.setTabText(3, tr("tab_rules"))
         self._tabs.setTabText(4, tr("tab_events"))
-        self._tabs.setTabText(5, tr("tab_lore"))
-        self._tabs.setTabText(6, tr("populate"))
+        self._tabs.setTabText(5, tr("tab_setup") if "tab_setup" in tr("ready") else "Story Setup")
+        self._tabs.setTabText(6, tr("tab_lore"))
+        self._tabs.setTabText(7, tr("populate"))
 
         self._lore_group.setTitle(tr("world_lore"))
         self._prompt_group.setTitle(tr("sys_prompt_override"))
@@ -203,6 +207,7 @@ class CreatorStudioView(QWidget):
         self._stat_editor.retranslate_ui()
         self._lore_book_editor.retranslate_ui()
         self._scheduled_events_editor.retranslate_ui()
+        self._story_setup_editor.retranslate_ui()
 
     def load_universe(self, db_path: str) -> None:
         self._db_path = db_path
@@ -226,6 +231,7 @@ class CreatorStudioView(QWidget):
         self._rule_editor.set_stat_definitions(sdefs)
         self._lore_book_editor.populate(data.get("lore_book", []))
         self._scheduled_events_editor.set_events_and_calendar(data.get("scheduled_events", []), data.get("meta", {}))
+        self._story_setup_editor.populate(data.get("story_setup", []))
         self._on_meta_loaded(data.get("meta", {}))
 
     @Slot(int)
@@ -258,7 +264,8 @@ class CreatorStudioView(QWidget):
             "entities": self._entity_editor.collect_data(),
             "rules": self._rule_editor.collect_data(),
             "lore_book": self._lore_book_editor.collect_data(),
-            "scheduled_events": events
+            "scheduled_events": events,
+            "story_setup": self._story_setup_editor.collect_data()
         }
 
         self._save_worker = DbWorker(self._db_path)
@@ -266,7 +273,8 @@ class CreatorStudioView(QWidget):
         self._save_worker.error_occurred.connect(self._on_worker_error)
         self._save_worker.save_full_universe(
             data["entities"], data["rules"], data["meta"], 
-            data["lore_book"], data["stat_definitions"], data["scheduled_events"]
+            data["lore_book"], data["stat_definitions"], data["scheduled_events"],
+            data["story_setup"]
         )
 
     @Slot()

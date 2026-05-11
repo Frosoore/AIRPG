@@ -27,19 +27,28 @@ class RegenerateWorker(QThread):
         try:
             self.status_update.emit("Generating new variant...")
             
-            # Try to find player_id from history
+            # Map history format (Event-sourced -> LLMMessage format)
+            llm_history = []
             player_id = "player_1"
-            if self._history:
-                for m in reversed(self._history):
-                    if m["role"] == "user" and m.get("name"):
-                        player_id = m["name"]
-                        break
+            
+            for h in self._history:
+                if h.get("event_type") == "user_input":
+                    payload = h.get("payload", "")
+                    text = payload.get("text", str(payload)) if isinstance(payload, dict) else str(payload)
+                    llm_history.append({"role": "user", "content": text})
+                elif h.get("event_type") == "narrative_text":
+                    payload = h.get("payload", "")
+                    if isinstance(payload, dict) and "variants" in payload:
+                        text = payload["variants"][payload["active"]]
+                    else:
+                        text = str(payload)
+                    llm_history.append({"role": "assistant", "content": text})
 
             prompt = build_narrative_prompt(
                 universe_system_prompt=self._system_prompt,
                 entity_stats_block="", # We don't need stats because we won't evaluate rules
                 rag_chunks=[],
-                history=self._history,
+                history=llm_history,
                 user_message=self._user_message,
                 verbosity_level=self._verbosity_level,
                 player_id=player_id

@@ -685,6 +685,43 @@ class CreatePlayerEntityTask(BaseDbTask):
         return eid
 
 
+class LoadInventoryTask(BaseDbTask):
+    """Fetch inventory for all active entities."""
+    def __init__(self, db_path: str, save_id: str):
+        super().__init__(db_path)
+        self.save_id = save_id
+
+    def execute(self) -> dict:
+        from workers.db_helpers import get_inventory
+        with get_connection(self.db_path) as conn:
+            rows = conn.execute(
+                "SELECT entity_id FROM Entities WHERE is_active = 1;"
+            ).fetchall()
+        
+        inventory_map = {}
+        for row in rows:
+            eid = row[0]
+            inv = get_inventory(self.db_path, self.save_id, eid)
+            if inv:
+                inventory_map[eid] = inv
+        return inventory_map
+
+
+class LoadTimelineTask(BaseDbTask):
+    """Fetch the event timeline."""
+    def __init__(self, db_path: str, save_id: str):
+        super().__init__(db_path)
+        self.save_id = save_id
+
+    def execute(self) -> list[dict]:
+        with get_connection(self.db_path) as conn:
+            rows = conn.execute(
+                "SELECT turn_id, in_game_time, description FROM Timeline WHERE save_id = ? ORDER BY turn_id DESC;",
+                (self.save_id,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+
 class DeleteEntityTask(BaseDbTask):
     """Permanently deletes an entity and its stats."""
     def __init__(self, db_path: str, entity_id: str):

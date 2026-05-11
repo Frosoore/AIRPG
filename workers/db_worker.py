@@ -26,7 +26,8 @@ from database.schema import (
 from workers.db_tasks import (
     LoadStatsTask, LoadCheckpointsTask, RewindTask, AppendEventTask,
     LoadSessionHistoryTask, UpdateVariantTask, SnapshotTask, DeleteSaveTask,
-    PopulateEntitiesTask, TickModifiersTask, CreatePlayerEntityTask, DeleteEntityTask
+    PopulateEntitiesTask, TickModifiersTask, CreatePlayerEntityTask, DeleteEntityTask,
+    LoadInventoryTask, LoadTimelineTask
 )
 
 
@@ -85,6 +86,16 @@ class DbWorker(QObject):
     def load_stats(self, save_id: str) -> None:
         task = LoadStatsTask(self._db_path, save_id)
         task.signals.result.connect(self.stats_loaded.emit)
+        self._setup_task(task)
+
+    def load_inventory(self, save_id: str) -> None:
+        task = LoadInventoryTask(self._db_path, save_id)
+        task.signals.result.connect(self.inventory_loaded.emit)
+        self._setup_task(task)
+
+    def load_timeline(self, save_id: str) -> None:
+        task = LoadTimelineTask(self._db_path, save_id)
+        task.signals.result.connect(self.timeline_loaded.emit)
         self._setup_task(task)
 
     def load_stats_and_inventory(self, save_id: str) -> None:
@@ -281,13 +292,15 @@ class DbWorker(QObject):
         task.signals.result.connect(lambda _: self.save_complete.emit())
         self._setup_task(task)
 
-    def save_full_universe(self, entities, rules, meta, lore_book, stat_definitions=None, scheduled_events=None) -> None:
+    def save_full_universe(self, entities, rules, meta, lore_book, stat_definitions=None, scheduled_events=None, story_setup=None) -> None:
         class TempTask(LoadStatsTask):
             def execute(self) -> bool:
+                from database.schema import migrate_story_setup_table
                 migrate_lore_book_table(self.db_path)
                 migrate_stat_definitions_table(self.db_path)
                 migrate_entities_table(self.db_path)
                 migrate_scheduled_events_table(self.db_path)
+                migrate_story_setup_table(self.db_path)
                 with sqlite3.connect(self.db_path) as conn:
                     conn.execute("PRAGMA foreign_keys=ON;")
                     conn.execute("DELETE FROM Entity_Stats;")
@@ -323,6 +336,14 @@ class DbWorker(QObject):
                         for ev in scheduled_events:
                             conn.execute("INSERT INTO Scheduled_Events (event_id, trigger_minute, title, description) VALUES (?, ?, ?, ?);",
                                        (ev["event_id"], int(ev["trigger_minute"]), ev["title"], ev["description"]))
+                    
+                    conn.execute("DELETE FROM Story_Setup;")
+                    if story_setup:
+                        for ss in story_setup:
+                            conn.execute(
+                                "INSERT INTO Story_Setup (setup_id, question, type, options, max_selections, priority) VALUES (?, ?, ?, ?, ?, ?);",
+                                (ss["setup_id"], ss["question"], ss["type"], json.dumps(ss.get("options", [])), ss.get("max_selections", 1), ss.get("priority", 0))
+                            )
                     conn.commit()
                 return True
 
@@ -410,7 +431,20 @@ class DbWorker(QObject):
                     se_rows = conn.execute("SELECT event_id, trigger_minute, title, description FROM Scheduled_Events;").fetchall()
                     scheduled_events = [{"event_id": r["event_id"], "trigger_minute": r["trigger_minute"], "title": r["title"], "description": r["description"]} for r in se_rows]
 
-                    # 7. History
+                    # 7. Story Setup
+                    from database.schema import migrate_story_setup_table
+                    migrate_story_setup_table(self.db_path)
+                    ss_rows = conn.execute("SELECT setup_id, question, type, options, max_selections, priority FROM Story_Setup ORDER BY priority ASC;").fetchall()
+                    story_setup = [{
+                        "setup_id": r["setup_id"],
+                        "question": r["question"],
+                        "type": r["type"],
+                        "options": json.loads(r["options"]),
+                        "max_selections": r["max_selections"],
+                        "priority": r["priority"]
+                    } for r in ss_rows]
+
+                    # 8. History
                     history = []
                     max_tid = 0
                     if save_id:
@@ -419,7 +453,7 @@ class DbWorker(QObject):
                             max_tid = max(max_tid, row[0])
                             history.append({"turn_id": row[0], "event_type": row[1], "payload": json.loads(row[2])})
                             
-                return entities, rules, lore, meta, stat_defs, scheduled_events, history, max_tid
+                return entities, rules, lore, meta, stat_defs, scheduled_events, story_setup, history, max_tid
 
         task = TempTask(self._db_path, save_id)
         task.signals.result.connect(lambda res: (
@@ -435,9 +469,10 @@ class DbWorker(QObject):
                 "lore_book": res[2],
                 "meta": res[3],
                 "stat_definitions": res[4],
-                "scheduled_events": res[5]
+                "scheduled_events": res[5],
+                "story_setup": res[6]
             }),
-            self.history_loaded.emit(res[6], res[7]) if save_id else None
+            self.history_loaded.emit(res[7], res[8]) if save_id else None
         ))
         self._setup_task(task)
 

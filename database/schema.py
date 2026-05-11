@@ -187,6 +187,17 @@ CREATE TABLE IF NOT EXISTS Items_Inventory (
 );
 """
 
+_DDL_STORY_SETUP = """
+CREATE TABLE IF NOT EXISTS Story_Setup (
+    setup_id       TEXT PRIMARY KEY,
+    question       TEXT NOT NULL,
+    type           TEXT NOT NULL CHECK(type IN ('text', 'single_choice', 'multi_choice')),
+    options        TEXT NOT NULL DEFAULT '[]',
+    max_selections INTEGER NOT NULL DEFAULT 1,
+    priority       INTEGER NOT NULL DEFAULT 0
+);
+"""
+
 _ALL_DDL: list[str] = [
     _DDL_UNIVERSE_META,
     _DDL_ENTITIES,
@@ -204,6 +215,7 @@ _ALL_DDL: list[str] = [
     _DDL_FIRED_SCHEDULED_EVENTS,
     _DDL_ITEM_DEFINITIONS,
     _DDL_ITEMS_INVENTORY,
+    _DDL_STORY_SETUP,
 ]
 
 # Canonical set of table names produced by create_universe_db
@@ -224,6 +236,7 @@ EXPECTED_TABLES: frozenset[str] = frozenset({
     "Fired_Scheduled_Events",
     "Item_Definitions",
     "Items_Inventory",
+    "Story_Setup",
 })
 
 
@@ -367,6 +380,13 @@ def migrate_inventory_tables(db_path: str) -> None:
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(_DDL_ITEM_DEFINITIONS)
         conn.execute(_DDL_ITEMS_INVENTORY)
+        conn.commit()
+
+
+def migrate_story_setup_table(db_path: str) -> None:
+    """Create the Story_Setup table if it does not exist in an older database."""
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(_DDL_STORY_SETUP)
         conn.commit()
 
 

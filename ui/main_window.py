@@ -48,6 +48,7 @@ class MainWindow(QMainWindow):
     _CREATOR_INDEX: int = 1
     _TABLETOP_INDEX: int = 2
     _LOADING_INDEX: int = 3
+    _SETUP_INDEX: int = 4
 
     def __init__(self) -> None:
         super().__init__()
@@ -115,6 +116,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_hub_view"): self._hub_view.retranslate_ui()
         if hasattr(self, "_creator_view"): self._creator_view.retranslate_ui()
         if hasattr(self, "_tabletop_view"): self._tabletop_view.retranslate_ui()
+        if hasattr(self, "_setup_view"): self._setup_view.retranslate_ui()
 
     def _on_volume_changed(self, value: int) -> None:
         """Update audio output volume (0.0 to 1.0)."""
@@ -148,6 +150,7 @@ class MainWindow(QMainWindow):
         from ui.creator_studio_view import CreatorStudioView
         from ui.tabletop_view import TabletopView
         from ui.loading_view import LoadingView
+        from ui.setup_view import SetupView
 
         self._stack = QStackedWidget()
         self.setCentralWidget(self._stack)
@@ -156,11 +159,13 @@ class MainWindow(QMainWindow):
         self._creator_view = CreatorStudioView(main_window=self)
         self._tabletop_view = TabletopView(main_window=self)
         self._loading_view = LoadingView(self)
+        self._setup_view = SetupView(main_window=self)
 
         self._stack.addWidget(self._hub_view)       # index 0
         self._stack.addWidget(self._creator_view)   # index 1
         self._stack.addWidget(self._tabletop_view)  # index 2
         self._stack.addWidget(self._loading_view)   # index 3
+        self._stack.addWidget(self._setup_view)     # index 4
 
         # Connect Tabletop loading signals
         self._tabletop_view.session_loaded.connect(self._on_session_ready)
@@ -221,11 +226,21 @@ class MainWindow(QMainWindow):
         self._stack.setCurrentIndex(self._CREATOR_INDEX)
         self._creator_view.load_universe(db_path)
 
+    def show_setup(self, db_path: str) -> None:
+        """Switch to the Setup screen.
+
+        Args:
+            db_path: Path to the universe .db file.
+        """
+        self._stack.setCurrentIndex(self._SETUP_INDEX)
+        self._setup_view.load_universe(db_path)
+
     def show_tabletop(
         self,
         db_path: str,
         save_id: str,
         player_persona: str = "",
+        setup_answers: dict[str, str] | None = None,
     ) -> None:
         """Switch to the Loading screen then initialise the session.
 
@@ -234,6 +249,7 @@ class MainWindow(QMainWindow):
             save_id:        The save to load.
             player_persona: Optional player background string passed to the
                             narrative prompt.
+            setup_answers:  Optional answers from the Story Setup phase.
         """
         self._active_db_path = db_path
         self._active_save_id = save_id
@@ -248,7 +264,7 @@ class MainWindow(QMainWindow):
         # the LoadingView has a chance to paint itself.
         from PySide6.QtCore import QTimer
         QTimer.singleShot(50, lambda: self._tabletop_view.load_session(
-            db_path, save_id, player_persona=player_persona
+            db_path, save_id, player_persona=player_persona, setup_answers=setup_answers
         ))
 
     # ------------------------------------------------------------------
