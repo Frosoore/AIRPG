@@ -641,7 +641,151 @@ class PopulateLoreTask(BaseDbTask):
         self.signals.status.emit("Lore expansion complete: No new entries added.")
         return 0
 
+class PopulateMapTask(BaseDbTask):
+    """AI-driven map generation (Locations & Connections)."""
+    def __init__(self, db_path: str, mode: str = "auto", custom_text: str | None = None):
+        super().__init__(db_path)
+        self.mode = mode
+        self.custom_text = custom_text
+
+    def execute(self) -> dict:
+        from core.config import load_config, build_llm_from_config
+        from llm_engine.prompt_builder import build_populate_map_prompt
+        
+        self.signals.status.emit("Initializing AI backend...")
+        cfg = load_config()
+        llm = build_llm_from_config(cfg, model_override=cfg.extraction_model)
+            
+        with get_connection(self.db_path) as conn:
+            row = conn.execute("SELECT value FROM Universe_Meta WHERE key = 'global_lore';").fetchone()
+            global_lore = row[0] if row else ""
+            loc_rows = conn.execute("SELECT location_id, name, scale FROM Locations;").fetchall()
+            existing_locs = [dict(r) for r in loc_rows]
+
+        self.signals.status.emit("Generating world map expansion...")
+        prompt = build_populate_map_prompt(global_lore, existing_locs, 
+                                           custom_instruction=self.custom_text if self.mode == "custom" else None)
+        
+        resp = llm.complete(prompt, response_format="json")
+        data = resp.tool_call
+        
+        # Extremely robust parsing: search for the first dictionary if a list is returned
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict):
+                    data = item
+                    break
+        
+        if not isinstance(data, dict):
+            print(f"[POPULATE_MAP] Invalid response format (expected dict or list containing dict, got {type(data)}): {data}")
+            return {"added_locs": 0, "added_conns": 0}
+
+        new_locs = data.get("locations", [])
+        new_conns = data.get("connections", [])
+        
+        added_locs = 0
+        added_conns = 0
+        
+        with get_connection(self.db_path) as conn:
+            # Pre-fetch existing IDs to avoid redundant queries in loops
+            existing_ids_rows = conn.execute("SELECT location_id FROM Locations;").fetchall()
+            existing_ids = {str(r[0]) for r in existing_ids_rows}
+
+            # 1. Insert Locations
+            for l in new_locs:
+                lid = l.get("location_id")
+                if not lid: continue
+                if lid in existing_ids: continue
+                
+                # Default name to scale if missing
+                name = l.get("name", "").strip()
+                scale = str(l.get("scale", "zone")).lower()
+                if not name:
+                    name = scale.capitalize()
+                
+                # Handle 'none'/'null' strings for parent_id
+                pid = l.get("parent_id")
+                if isinstance(pid, str) and pid.lower() in ("none", "null", ""):
+                    pid = None
+                
+                conn.execute(
+                    "INSERT INTO Locations (location_id, name, scale, parent_id, description, x, y) VALUES (?, ?, ?, ?, ?, ?, ?);",
+                    (lid, name, scale, pid, l.get("description", ""), l.get("x", 0), l.get("y", 0))
+                )
+                existing_ids.add(lid)
+                added_locs += 1
+                
+            # 2. Insert Connections
+            for c in new_conns:
+                src = c.get("source_id")
+                tgt = c.get("target_id")
+                if not src or not tgt: continue
+                if src not in existing_ids or tgt not in existing_ids:
+                    # Skip connections to non-existent nodes (safety)
+                    continue
+                
+                # Bi-directional insert
+                try:
+                    dist = int(c.get("distance_km", 10))
+                    conn.execute(
+                        "INSERT OR IGNORE INTO Location_Connections (source_id, target_id, distance_km) VALUES (?, ?, ?);",
+                        (src, tgt, dist)
+                    )
+                    conn.execute(
+                        "INSERT OR IGNORE INTO Location_Connections (source_id, target_id, distance_km) VALUES (?, ?, ?);",
+                        (tgt, src, dist)
+                    )
+                    added_conns += 1
+                except:
+                    pass
+                    
+            conn.commit()
+            
+        self.signals.status.emit(f"Map generation complete: {added_locs} locations, {added_conns} connections added.")
+        return {"added_locs": added_locs, "added_conns": added_conns}
+
 class CreatePlayerEntityTask(BaseDbTask):
+    """Creates a new entity of type 'player' with initial stats."""
+    def __init__(self, db_path: str, name: str, description: str = ""):
+        super().__init__(db_path)
+        self.name = name
+        self.description = description
+
+    def execute(self) -> str:
+        self.signals.status.emit(f"Creating player entity '{self.name}'...")
+        import re
+        from datetime import datetime
+        # 1. Generate safe ID
+        eid = re.sub(r'[^a-z0-9]', '_', self.name.lower()).strip('_')
+        if not eid:
+            eid = f"player_{int(datetime.now().timestamp())}"
+            
+        with get_connection(self.db_path) as conn:
+            # Check for collision
+            row = conn.execute("SELECT 1 FROM Entities WHERE entity_id = ?;", (eid,)).fetchone()
+            if row:
+                eid = f"{eid}_{int(datetime.now().timestamp() % 1000)}"
+
+            # Insert Entity
+            conn.execute(
+                "INSERT INTO Entities (entity_id, name, entity_type, description, is_active) "
+                "VALUES (?, ?, 'player', ?, 1);",
+                (eid, self.name, self.description)
+            )
+            
+            # 2. Assign default stats if definitions exist
+            stat_rows = conn.execute("SELECT name FROM Stat_Definitions;").fetchall()
+            for r in stat_rows:
+                stat_name = r[0]
+                conn.execute(
+                    "INSERT INTO Entity_Stats (entity_id, stat_key, stat_value) VALUES (?, ?, ?);",
+                    (eid, stat_name, "10") 
+                )
+            
+            conn.commit()
+            
+        self.signals.status.emit(f"Player {eid} created.")
+        return eid
     """Creates a new entity of type 'player' with initial stats."""
     def __init__(self, db_path: str, name: str, description: str = ""):
         super().__init__(db_path)

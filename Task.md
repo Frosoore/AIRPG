@@ -144,4 +144,12 @@ Status legend: `[ ]` To Do · `[~]` In Progress · `[x]` Done
 - [x] 17.9 — Deployment: SVG Icon Dependency & Absolute Path Fixes
 - [x] 17.10 — UX: Descriptive Tooltips & Consistent ASCII Aesthetic
 
+## Phase 18: Spatial Navigation & Hierarchical Mapping
+- [x] 18.1 — Database: Locations & Connections tables
+- [x] 18.2 — UI: Hierarchical Map Editor (Tree + QGraphicsScene)
+- [x] 18.3 — Core: Spatial Context Fetcher (Breadcrumbs & Neighbors)
+- [x] 18.4 — Arbitrator: Prompt Injection & Context Optimization
+- [x] 18.5 — Integration: Travel Distance -> Time passage logic
+- [x] 18.6 — Maintenance: Restore full test coverage (Fix Arbitrator tests)
+
 

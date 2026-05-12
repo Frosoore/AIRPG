@@ -321,3 +321,60 @@ def get_inventory(db_path: str, save_id: str, entity_id: str) -> list[dict]:
     except Exception as e:
         print(f"[DB_HELPERS] Error fetching inventory for {entity_id}: {e}")
     return inventory
+
+def get_spatial_context(db_path: str, location_id: str) -> dict:
+    """Fetch the breadcrumb path and immediate neighbors for a location.
+
+    Args:
+        db_path: Path to the universe .db file.
+        location_id: The ID of the current location.
+
+    Returns:
+        Dict with 'breadcrumb' (str), 'description' (str), and 'neighbors' (list of dicts).
+    """
+    breadcrumb = []
+    description = ""
+    neighbors = []
+
+    try:
+        with get_connection(db_path) as conn:
+            # 1. Trace breadcrumbs up to the root
+            curr_id = location_id
+            visited = set()
+            while curr_id and curr_id not in visited:
+                visited.add(curr_id)
+                row = conn.execute(
+                    "SELECT name, parent_id, description FROM Locations WHERE location_id = ?;",
+                    (curr_id,)
+                ).fetchone()
+                if not row:
+                    break
+                
+                if curr_id == location_id:
+                    description = row["description"]
+                
+                breadcrumb.append(row["name"])
+                curr_id = row["parent_id"]
+            
+            breadcrumb.reverse()
+            
+            # 2. Fetch direct neighbors
+            n_rows = conn.execute(
+                """
+                SELECT l.location_id, l.name, c.distance_km 
+                FROM Location_Connections c
+                JOIN Locations l ON c.target_id = l.location_id
+                WHERE c.source_id = ?;
+                """,
+                (location_id,)
+            ).fetchall()
+            neighbors = [dict(r) for r in n_rows]
+
+    except Exception as e:
+        print(f"[DB_HELPERS] Error fetching spatial context for {location_id}: {e}")
+
+    return {
+        "breadcrumb": " > ".join(breadcrumb) if breadcrumb else "Unknown",
+        "description": description,
+        "neighbors": neighbors
+    }

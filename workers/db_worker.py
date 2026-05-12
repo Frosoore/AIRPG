@@ -21,7 +21,8 @@ from database.schema import (
     migrate_stat_definitions_table,
     migrate_entities_table,
     migrate_scheduled_events_table,
-    migrate_timeline_table
+    migrate_timeline_table,
+    migrate_location_tables
 )
 from workers.db_tasks import (
     LoadStatsTask, LoadCheckpointsTask, RewindTask, AppendEventTask,
@@ -187,6 +188,13 @@ class DbWorker(QObject):
         task.signals.result.connect(lambda _: self.load_full_universe())
         self._setup_task(task)
 
+    def populate_map(self, mode: str = "auto", custom_text: str | None = None) -> None:
+        """AI-driven world map generation (asynchronous)."""
+        from workers.db_tasks import PopulateMapTask
+        task = PopulateMapTask(self._db_path, mode, custom_text)
+        task.signals.result.connect(lambda _: self.load_full_universe())
+        self._setup_task(task)
+
     def populate_meta(self, mode: str = "auto", custom_text: str | None = None) -> None:
         from workers.db_tasks import PopulateMetaTask
         task = PopulateMetaTask(self._db_path, mode, custom_text)
@@ -292,7 +300,7 @@ class DbWorker(QObject):
         task.signals.result.connect(lambda _: self.save_complete.emit())
         self._setup_task(task)
 
-    def save_full_universe(self, entities, rules, meta, lore_book, stat_definitions=None, scheduled_events=None, story_setup=None) -> None:
+    def save_full_universe(self, entities, rules, meta, lore_book, stat_definitions=None, scheduled_events=None, story_setup=None, locations=None, connections=None) -> None:
         class TempTask(LoadStatsTask):
             def execute(self) -> bool:
                 from database.schema import migrate_story_setup_table
@@ -301,6 +309,7 @@ class DbWorker(QObject):
                 migrate_entities_table(self.db_path)
                 migrate_scheduled_events_table(self.db_path)
                 migrate_story_setup_table(self.db_path)
+                migrate_location_tables(self.db_path)
                 with sqlite3.connect(self.db_path) as conn:
                     conn.execute("PRAGMA foreign_keys=ON;")
                     conn.execute("DELETE FROM Entity_Stats;")
@@ -344,6 +353,21 @@ class DbWorker(QObject):
                                 "INSERT INTO Story_Setup (setup_id, question, type, options, max_selections, priority) VALUES (?, ?, ?, ?, ?, ?);",
                                 (ss["setup_id"], ss["question"], ss["type"], json.dumps(ss.get("options", [])), ss.get("max_selections", 1), ss.get("priority", 0))
                             )
+                    
+                    conn.execute("DELETE FROM Location_Connections;")
+                    conn.execute("DELETE FROM Locations;")
+                    if locations:
+                        for l in locations:
+                            conn.execute(
+                                "INSERT INTO Locations (location_id, name, scale, parent_id, description, x, y) VALUES (?, ?, ?, ?, ?, ?, ?);",
+                                (l["location_id"], l["name"], l["scale"], l.get("parent_id"), l.get("description", ""), l.get("x", 0), l.get("y", 0))
+                            )
+                    if connections:
+                        for c in connections:
+                            conn.execute(
+                                "INSERT INTO Location_Connections (source_id, target_id, distance_km) VALUES (?, ?, ?);",
+                                (c["source_id"], c["target_id"], int(c["distance_km"]))
+                            )
                     conn.commit()
                 return True
 
@@ -383,6 +407,7 @@ class DbWorker(QObject):
                 migrate_stat_definitions_table(self.db_path)
                 migrate_entities_table(self.db_path)
                 migrate_scheduled_events_table(self.db_path)
+                migrate_location_tables(self.db_path)
                 with sqlite3.connect(self.db_path) as conn:
                     conn.row_factory = sqlite3.Row
                     # 1. Entities
@@ -453,28 +478,44 @@ class DbWorker(QObject):
                             max_tid = max(max_tid, row[0])
                             history.append({"turn_id": row[0], "event_type": row[1], "payload": json.loads(row[2])})
                             
-                return entities, rules, lore, meta, stat_defs, scheduled_events, story_setup, history, max_tid
+                    # 9. Locations
+                    loc_rows = conn.execute("SELECT location_id, name, scale, parent_id, description, x, y FROM Locations;").fetchall()
+                    locations = [dict(r) for r in loc_rows]
+
+                    # 10. Connections
+                    conn_rows = conn.execute("SELECT source_id, target_id, distance_km FROM Location_Connections;").fetchall()
+                    connections = [dict(r) for r in conn_rows]
+                            
+                return entities, rules, lore, meta, stat_defs, scheduled_events, story_setup, history, max_tid, locations, connections
 
         task = TempTask(self._db_path, save_id)
-        task.signals.result.connect(lambda res: (
-            self.entities_loaded.emit(res[0]),
-            self.rules_loaded.emit(res[1]),
-            self.lore_book_loaded.emit(res[2]),
-            self.universe_meta_loaded.emit(res[3]),
-            self.stat_definitions_loaded.emit(res[4]),
-            self.scheduled_events_loaded.emit(res[5]),
-            self.full_universe_loaded.emit({
-                "entities": res[0],
-                "rules": res[1],
-                "lore_book": res[2],
-                "meta": res[3],
-                "stat_definitions": res[4],
-                "scheduled_events": res[5],
-                "story_setup": res[6]
-            }),
-            self.history_loaded.emit(res[7], res[8]) if save_id else None
-        ))
+        task.signals.result.connect(self._on_load_full_universe_result)
         self._setup_task(task)
+
+    def _on_load_full_universe_result(self, res: tuple) -> None:
+        """Handle the multi-element result from load_full_universe."""
+        self.entities_loaded.emit(res[0])
+        self.rules_loaded.emit(res[1])
+        self.lore_book_loaded.emit(res[2])
+        self.universe_meta_loaded.emit(res[3])
+        self.stat_definitions_loaded.emit(res[4])
+        self.scheduled_events_loaded.emit(res[5])
+        
+        self.full_universe_loaded.emit({
+            "entities": res[0],
+            "rules": res[1],
+            "lore_book": res[2],
+            "meta": res[3],
+            "stat_definitions": res[4],
+            "scheduled_events": res[5],
+            "story_setup": res[6],
+            "locations": res[9],
+            "connections": res[10]
+        })
+        
+        # history (res[7]) and max_tid (res[8])
+        if len(res) > 7 and res[7] is not None:
+            self.history_loaded.emit(res[7], res[8])
 
     def load_global_personas(self) -> None:
         class TempTask(LoadStatsTask):
@@ -498,4 +539,3 @@ class DbWorker(QObject):
                 return True
         task = TempTask(self._db_path, "")
         task.signals.result.connect(lambda _: self.save_complete.emit())
-        self._setup_task(task)

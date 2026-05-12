@@ -120,15 +120,9 @@ def _make_arbitrator(
     rules: list[dict] | None = None,
 ) -> tuple[ArbitratorEngine, _StubLLM]:
     llm = _StubLLM(llm_response)
-    es = EventSourcer(db_path)
-    mp = ModifierProcessor(db_path)
-    re = RulesEngine(rules or [])
-    arb = ArbitratorEngine(
-        llm=llm, event_sourcer=es, modifier_processor=mp,
-        rules_engine=re, vector_memory=vm, db_path=db_path,
-    )
+    arb = ArbitratorEngine(db_path, rules or [])
+    arb.configure(llm, vm)
     return arb, llm
-
 
 # ---------------------------------------------------------------------------
 # ArbitratorResult dataclass
@@ -264,7 +258,7 @@ class TestCorrectionLoop:
         arb, _ = _make_arbitrator(db_path, vm, response)
         arb.process_turn("s1", 1, "bad", "sys", [])
         assert arb._pending_correction is not None
-        assert "SYSTEM CORRECTION" in arb._pending_correction
+        assert "[NARRATOR HINT:" in arb._pending_correction
 
     def test_pending_correction_injected_in_next_turn(self, db_path, vm) -> None:
         # Turn 1: reject a change
@@ -283,8 +277,8 @@ class TestCorrectionLoop:
         es = EventSourcer(db_path)
         mp = ModifierProcessor(db_path)
         re = RulesEngine([])
-        arb = ArbitratorEngine(llm=llm1, event_sourcer=es, modifier_processor=mp,
-                         rules_engine=re, vector_memory=vm, db_path=db_path)
+        arb = ArbitratorEngine(db_path, [])
+        arb.configure(llm1, vm)
 
         arb.process_turn("s1", 1, "bad", "sys", [])
         assert arb._pending_correction is not None
@@ -296,7 +290,7 @@ class TestCorrectionLoop:
         # Correction must appear in the messages sent to turn-2 LLM
         messages = llm2.last_messages
         system_msgs = [m for m in messages if m["role"] == "system"]
-        correction_injected = any("SYSTEM CORRECTION" in m["content"] for m in system_msgs)
+        correction_injected = any("[NARRATOR HINT:" in m["content"] for m in system_msgs)
         assert correction_injected
 
     def test_pending_correction_cleared_after_use(self, db_path, vm) -> None:
@@ -458,14 +452,8 @@ class TestStreamingCallback:
         from database.modifier_processor import ModifierProcessor
         from core.rules_engine import RulesEngine
         from core.arbitrator import ArbitratorEngine
-        arb = ArbitratorEngine(
-            llm=llm,
-            event_sourcer=EventSourcer(db_path),
-            modifier_processor=ModifierProcessor(db_path),
-            rules_engine=RulesEngine([]),
-            vector_memory=vm,
-            db_path=db_path,
-        )
+        arb = ArbitratorEngine(db_path, [])
+        arb.configure(llm, vm)
         received: list[str] = []
         arb.process_turn(
             "s1", 1, "test", "sys", [],
@@ -503,7 +491,7 @@ class TestStreamingCallback:
         from unittest.mock import patch
         with patch(
             "llm_engine.vector_memory.SentenceTransformerEmbeddingFunction",
-            return_value=vm._embedding_fn,
+            return_value=_FakeEmbeddingFn(),
         ):
             from llm_engine.vector_memory import VectorMemory
             import os
@@ -514,14 +502,8 @@ class TestStreamingCallback:
         from database.modifier_processor import ModifierProcessor
         from core.rules_engine import RulesEngine
         from core.arbitrator import ArbitratorEngine
-        arb_s = ArbitratorEngine(
-            llm=llm_s,
-            event_sourcer=EventSourcer(db2),
-            modifier_processor=ModifierProcessor(db2),
-            rules_engine=RulesEngine([]),
-            vector_memory=vm2,
-            db_path=db2,
-        )
+        arb_s = ArbitratorEngine(db2, [])
+        arb_s.configure(llm_s, vm2)
         tokens: list[str] = []
         result_s = arb_s.process_turn(
             "s1", 1, "go", "sys", [],
@@ -561,14 +543,8 @@ class TestDynamicStopSequences:
         from database.modifier_processor import ModifierProcessor
         from core.rules_engine import RulesEngine
         from core.arbitrator import ArbitratorEngine
-        arb = ArbitratorEngine(
-            llm=llm,
-            event_sourcer=EventSourcer(db_path),
-            modifier_processor=ModifierProcessor(db_path),
-            rules_engine=RulesEngine([]),
-            vector_memory=vm,
-            db_path=db_path,
-        )
+        arb = ArbitratorEngine(db_path, [])
+        arb.configure(llm, vm)
         
         arb.process_turn("s1", 1, "hello", "sys", [], player_entity_id="player1")
         

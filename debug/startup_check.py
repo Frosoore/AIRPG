@@ -8,7 +8,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def check_db_worker():
     """Verify that DbWorker has all required signals defined on the class."""
-    print("[1/2] Checking DbWorker signals...")
+    print("[1/3] Checking DbWorker signals...")
     try:
         from workers.db_worker import DbWorker
         
@@ -39,9 +39,25 @@ def check_db_worker():
         print(f"FAILED: Unexpected error checking DbWorker: {e}")
         return False
 
+def check_schema():
+    """Verify that the schema producing function includes the new spatial tables."""
+    print("[2/3] Verifying database schema...")
+    try:
+        from database.schema import EXPECTED_TABLES
+        new_tables = ["Locations", "Location_Connections"]
+        missing = [t for t in new_tables if t not in EXPECTED_TABLES]
+        if missing:
+            print(f"FAILED: Missing spatial tables in EXPECTED_TABLES: {missing}")
+            return False
+        print("SUCCESS: Spatial tables present in schema definition.")
+        return True
+    except Exception as e:
+        print(f"FAILED: Unexpected error checking schema: {e}")
+        return False
+
 def check_imports():
     """Verify core imports aren't broken."""
-    print("[2/2] Verifying core imports...")
+    print("[3/3] Verifying core imports...")
     core_modules = [
         ('PySide6.QtWidgets', 'pyside6'),
         ('chromadb', 'chromadb'),
@@ -78,6 +94,9 @@ def run_checks():
     print("--- AIRPG Startup Validation ---")
     
     if not check_db_worker():
+        sys.exit(1)
+
+    if not check_schema():
         sys.exit(1)
         
     if not check_imports():

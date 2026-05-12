@@ -43,7 +43,7 @@ class StorySetupEditorWidget(QWidget):
         layout = QVBoxLayout(self)
 
         # Header
-        self._header = QLabel(f"<b>{tr('tab_setup') if 'tab_setup' in tr('ready') else 'Story Setup'}</b>")
+        self._header = QLabel(f"<b>{tr('tab_setup')}</b>")
         layout.addWidget(self._header)
 
         # Input Row
@@ -88,7 +88,7 @@ class StorySetupEditorWidget(QWidget):
         layout.addWidget(self._del_btn)
 
     def retranslate_ui(self) -> None:
-        self._header.setText(f"<b>{tr('tab_setup') if 'tab_setup' in tr('ready') else 'Story Setup'}</b>")
+        self._header.setText(f"<b>{tr('tab_setup')}</b>")
         self._add_btn.setText(f"{tr('add')} +")
         self._del_btn.setText(tr("delete"))
         self._table.setHorizontalHeaderLabels([

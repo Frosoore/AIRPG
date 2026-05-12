@@ -122,7 +122,7 @@ class SetupView(QWidget):
         # Tab 3: Story Setup
         self._setup_tab = QWidget()
         self._setup_story_setup_tab()
-        self._tabs.addTab(self._setup_tab, tr("tab_setup") if "tab_setup" in tr("ready") else "Story Setup")
+        self._tabs.addTab(self._setup_tab, tr("tab_setup"))
 
         layout.addWidget(self._tabs)
 
@@ -185,7 +185,7 @@ class SetupView(QWidget):
         self._title_label.setText(tr("session_lobby"))
         self._back_btn.setText(tr("hub"))
         self._tabs.setTabText(0, tr("resume_save"))
-        self._tabs.setTabText(2, tr("tab_setup") if "tab_setup" in tr("ready") else "Story Setup")
+        self._tabs.setTabText(2, tr("tab_setup"))
         self._launch_btn.setText(tr("launch_session"))
         self._del_save_btn.setText(tr("delete_save"))
 

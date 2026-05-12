@@ -198,6 +198,30 @@ CREATE TABLE IF NOT EXISTS Story_Setup (
 );
 """
 
+_DDL_LOCATIONS = """
+CREATE TABLE IF NOT EXISTS Locations (
+    location_id TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    scale       TEXT NOT NULL CHECK(scale IN ('universe', 'galaxy', 'world', 'country', 'zone', 'city', 'district', 'building', 'room', 'poi')),
+    parent_id   TEXT,
+    description TEXT NOT NULL DEFAULT '',
+    x           REAL DEFAULT 0,
+    y           REAL DEFAULT 0,
+    FOREIGN KEY (parent_id) REFERENCES Locations(location_id) ON DELETE CASCADE
+);
+"""
+
+_DDL_LOCATION_CONNECTIONS = """
+CREATE TABLE IF NOT EXISTS Location_Connections (
+    source_id TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    distance_km INTEGER NOT NULL,
+    PRIMARY KEY (source_id, target_id),
+    FOREIGN KEY (source_id) REFERENCES Locations(location_id) ON DELETE CASCADE,
+    FOREIGN KEY (target_id) REFERENCES Locations(location_id) ON DELETE CASCADE
+);
+"""
+
 _ALL_DDL: list[str] = [
     _DDL_UNIVERSE_META,
     _DDL_ENTITIES,
@@ -216,6 +240,8 @@ _ALL_DDL: list[str] = [
     _DDL_ITEM_DEFINITIONS,
     _DDL_ITEMS_INVENTORY,
     _DDL_STORY_SETUP,
+    _DDL_LOCATIONS,
+    _DDL_LOCATION_CONNECTIONS,
 ]
 
 # Canonical set of table names produced by create_universe_db
@@ -237,6 +263,8 @@ EXPECTED_TABLES: frozenset[str] = frozenset({
     "Item_Definitions",
     "Items_Inventory",
     "Story_Setup",
+    "Locations",
+    "Location_Connections",
 })
 
 
@@ -387,6 +415,78 @@ def migrate_story_setup_table(db_path: str) -> None:
     """Create the Story_Setup table if it does not exist in an older database."""
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(_DDL_STORY_SETUP)
+        conn.commit()
+
+
+def migrate_location_tables(db_path: str) -> None:
+    """Create Locations and Location_Connections tables if they do not exist, or migrate them if constraints changed."""
+    with sqlite3.connect(str(db_path)) as conn:
+        # Check if table exists
+        row_loc = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='Locations';").fetchone()
+        row_conn = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='Location_Connections';").fetchone()
+        
+        if not row_loc:
+            # Table doesn't exist, just create them
+            conn.execute(_DDL_LOCATIONS)
+            conn.execute(_DDL_LOCATION_CONNECTIONS)
+        else:
+            # Table exists, check for migration needs:
+            # 1. New scales (room/poi)
+            # 2. Unit change (minutes to km)
+            # 3. Corruption (dangling FKs pointing to Locations_Old)
+            current_sql_loc = row_loc[0]
+            current_sql_conn = row_conn[0] if row_conn else ""
+            
+            needs_scale_update = ("'room'" not in current_sql_loc or "'poi'" not in current_sql_loc)
+            needs_unit_update = ("distance_minutes" in current_sql_conn)
+            is_corrupted = ("Locations_Old" in current_sql_conn)
+            
+            if needs_scale_update or needs_unit_update or is_corrupted:
+                # Migration needed or corruption detected
+                conn.execute("PRAGMA foreign_keys=OFF;")
+                try:
+                    conn.execute("BEGIN TRANSACTION;")
+                    
+                    # A. Migrate Locations
+                    conn.execute("DROP TABLE IF EXISTS Locations_Old;")
+                    conn.execute("ALTER TABLE Locations RENAME TO Locations_Old;")
+                    conn.execute(_DDL_LOCATIONS)
+                    # Copy data safely
+                    conn.execute(
+                        "INSERT INTO Locations (location_id, name, scale, parent_id, description, x, y) "
+                        "SELECT location_id, name, scale, parent_id, description, x, y FROM Locations_Old;"
+                    )
+                    conn.execute("DROP TABLE Locations_Old;")
+                    
+                    # B. Migrate Location_Connections
+                    if row_conn:
+                        # Detect which column to copy from
+                        info = conn.execute("PRAGMA table_info(Location_Connections);").fetchall()
+                        cols = [i[1] for i in info]
+                        source_col = "distance_km" if "distance_km" in cols else "distance_minutes"
+                        
+                        conn.execute("DROP TABLE IF EXISTS Location_Connections_Old;")
+                        conn.execute("ALTER TABLE Location_Connections RENAME TO Location_Connections_Old;")
+                        conn.execute(_DDL_LOCATION_CONNECTIONS)
+                        # Map the old column (minutes or km) to the new distance_km
+                        conn.execute(
+                            f"INSERT INTO Location_Connections (source_id, target_id, distance_km) "
+                            f"SELECT source_id, target_id, {source_col} FROM Location_Connections_Old;"
+                        )
+                        conn.execute("DROP TABLE Location_Connections_Old;")
+                    else:
+                        conn.execute(_DDL_LOCATION_CONNECTIONS)
+                    
+                    conn.execute("COMMIT;")
+                    print("[SCHEMA] Location tables successfully migrated/repaired.")
+                except Exception as e:
+                    conn.execute("ROLLBACK;")
+                    print(f"[SCHEMA] Migration failed, rolled back: {e}")
+                    # If migration fails, we don't raise here to avoid blocking app start, 
+                    # but the DB task worker will likely fail again on usage.
+                finally:
+                    conn.execute("PRAGMA foreign_keys=ON;")
+        
         conn.commit()
 
 

@@ -33,6 +33,7 @@ from ui.widgets.stat_definition_editor import StatDefinitionEditorWidget
 from ui.widgets.scheduled_events_editor import ScheduledEventsEditorWidget
 from ui.widgets.story_setup_editor import StorySetupEditorWidget
 from ui.widgets.populate_tab import PopulateTabWidget
+from ui.widgets.map_editor import MapEditorWidget
 from workers.db_worker import DbWorker
 from core.config import load_config
 from core.localization import tr
@@ -86,14 +87,16 @@ class CreatorStudioView(QWidget):
         self._lore_book_editor = LoreBookEditorWidget()
         self._scheduled_events_editor = ScheduledEventsEditorWidget()
         self._story_setup_editor = StorySetupEditorWidget()
+        self._map_editor = MapEditorWidget()
         self._populate_tab = PopulateTabWidget()
         
         self._tabs.addTab(self._build_lore_tab(), tr("tab_meta"))
         self._tabs.addTab(self._stat_editor, tr("stats"))
         self._tabs.addTab(self._entity_editor, tr("tab_entities"))
+        self._tabs.addTab(self._map_editor, tr("tab_map"))
         self._tabs.addTab(self._rule_editor, tr("tab_rules"))
         self._tabs.addTab(self._scheduled_events_editor, tr("tab_events"))
-        self._tabs.addTab(self._story_setup_editor, tr("tab_setup") if "tab_setup" in tr("ready") else "Story Setup")
+        self._tabs.addTab(self._story_setup_editor, tr("tab_setup"))
         self._tabs.addTab(self._lore_book_editor, tr("tab_lore"))
         self._tabs.addTab(self._populate_tab, tr("populate"))
         layout.addWidget(self._tabs)
@@ -105,6 +108,7 @@ class CreatorStudioView(QWidget):
         
         self._lore_book_editor.populate_requested.connect(self._on_populate_requested_single)
         self._populate_tab.populate_requested.connect(self._on_populate_requested)
+        self._map_editor.populate_requested.connect(self._on_map_populate_requested)
 
     def _setup_shortcuts(self) -> None:
         self._save_shortcut = QShortcut(QKeySequence("Ctrl+S"), self)
@@ -183,11 +187,12 @@ class CreatorStudioView(QWidget):
         self._tabs.setTabText(0, tr("tab_meta"))
         self._tabs.setTabText(1, tr("stats"))
         self._tabs.setTabText(2, tr("tab_entities"))
-        self._tabs.setTabText(3, tr("tab_rules"))
-        self._tabs.setTabText(4, tr("tab_events"))
-        self._tabs.setTabText(5, tr("tab_setup") if "tab_setup" in tr("ready") else "Story Setup")
-        self._tabs.setTabText(6, tr("tab_lore"))
-        self._tabs.setTabText(7, tr("populate"))
+        self._tabs.setTabText(3, tr("tab_map"))
+        self._tabs.setTabText(4, tr("tab_rules"))
+        self._tabs.setTabText(5, tr("tab_events"))
+        self._tabs.setTabText(6, tr("tab_setup"))
+        self._tabs.setTabText(7, tr("tab_lore"))
+        self._tabs.setTabText(8, tr("populate"))
 
         self._lore_group.setTitle(tr("world_lore"))
         self._prompt_group.setTitle(tr("sys_prompt_override"))
@@ -232,6 +237,7 @@ class CreatorStudioView(QWidget):
         self._lore_book_editor.populate(data.get("lore_book", []))
         self._scheduled_events_editor.set_events_and_calendar(data.get("scheduled_events", []), data.get("meta", {}))
         self._story_setup_editor.populate(data.get("story_setup", []))
+        self._map_editor.populate(data.get("locations", []), data.get("connections", []))
         self._on_meta_loaded(data.get("meta", {}))
 
     @Slot(int)
@@ -246,6 +252,7 @@ class CreatorStudioView(QWidget):
         if not self._db_path: return
 
         events, cal_meta = self._scheduled_events_editor.collect_data()
+        locs, conns = self._map_editor.collect_data()
         
         meta = {
             "global_lore": self._lore_edit.toPlainText().strip(),
@@ -265,7 +272,9 @@ class CreatorStudioView(QWidget):
             "rules": self._rule_editor.collect_data(),
             "lore_book": self._lore_book_editor.collect_data(),
             "scheduled_events": events,
-            "story_setup": self._story_setup_editor.collect_data()
+            "story_setup": self._story_setup_editor.collect_data(),
+            "locations": locs,
+            "connections": conns
         }
 
         self._save_worker = DbWorker(self._db_path)
@@ -274,7 +283,7 @@ class CreatorStudioView(QWidget):
         self._save_worker.save_full_universe(
             data["entities"], data["rules"], data["meta"], 
             data["lore_book"], data["stat_definitions"], data["scheduled_events"],
-            data["story_setup"]
+            data["story_setup"], data["locations"], data["connections"]
         )
 
     @Slot()
@@ -330,6 +339,16 @@ class CreatorStudioView(QWidget):
     @Slot()
     def _on_back_clicked(self) -> None:
         self._main_window.show_hub()
+
+    @Slot(str)
+    def _on_map_populate_requested(self, custom_text: str) -> None:
+        if not self._db_path: return
+        self._on_save_clicked() # Save before AI generation
+        worker = DbWorker(self._db_path)
+        worker.full_universe_loaded.connect(self._on_full_universe_loaded)
+        worker.status_update.connect(self._main_window.on_status_update)
+        worker.error_occurred.connect(self._on_worker_error)
+        worker.populate_map(custom_text=custom_text)
 
     @Slot(str)
     def _on_worker_error(self, message: str) -> None:

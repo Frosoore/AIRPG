@@ -23,8 +23,10 @@ import uuid
 from typing import Any
 
 # Lazy imports for heavy libraries
-# import chromadb
-# from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+try:
+    from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+except ImportError:
+    SentenceTransformerEmbeddingFunction = None
 
 
 _COLLECTION_NAME: str = "narrative_memory"

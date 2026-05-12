@@ -427,6 +427,61 @@ def build_populate_lore_prompt(
         {"role": "user", "content": user_content},
     ]
 
+POPULATE_MAP_SYSTEM_PROMPT = (
+    "You are an expert world builder. Your task is to expand the world map hierarchy and connections.\n"
+    "Available scales (from largest to smallest): universe, galaxy, world, country, zone, city, district, building, room, poi.\n"
+    "CRITICAL RULES:\n"
+    "1. Return a JSON object with 'locations' and 'connections' lists.\n"
+    "2. For each location: 'location_id' (unique string), 'name', 'scale', 'parent_id' (optional), 'description', 'x', 'y' (0 to 1000).\n"
+    "3. If a name is not specified or obvious, use the SCALE name as the default name (e.g., 'City', 'Universe').\n"
+    "4. For each connection: 'source_id', 'target_id', 'distance_km'.\n"
+    "5. Ensure the structure is logical and matches the world lore.\n"
+    "6. Use coordinates (x, y) to layout nodes at the SAME level (same parent) in a way that makes sense visually."
+)
+
+def build_populate_map_prompt(
+    global_lore: str,
+    existing_locations: list[dict],
+    custom_instruction: str | None = None,
+) -> list[LLMMessage]:
+    """Assemble the prompt for the 'Populate' Map generator."""
+    ctx_parts = [f"EXISTING WORLD LORE:\n{global_lore}"]
+    if existing_locations:
+        loc_str = "\n".join([f"- {l.get('name')} ({l.get('scale')}, ID: {l.get('location_id')})" for l in existing_locations[:50]])
+        ctx_parts.append(f"EXISTING LOCATIONS:\n{loc_str}")
+        
+    task_desc = "Expand the world map with new locations and connections."
+    if custom_instruction:
+        task_desc = f"GENERATE new map elements based on this instruction: {custom_instruction}"
+        
+    user_content = (
+        f"TASK: {task_desc}\n"
+        "OUTPUT REQUIREMENT: Respond ONLY with the JSON block. No preamble.\n\n"
+        "~~~json\n"
+        "{\n"
+        "  \"locations\": [\n"
+        "    {\n"
+        "      \"location_id\": \"id_string\",\n"
+        "      \"name\": \"Location Name\",\n"
+        "      \"scale\": \"city\",\n"
+        "      \"parent_id\": \"parent_id_string\",\n"
+        "      \"description\": \"Brief description\",\n"
+        "      \"x\": 100, \"y\": 200\n"
+        "    }\n"
+        "  ],\n"
+        "  \"connections\": [\n"
+        "    {\"source_id\": \"id1\", \"target_id\": \"id2\", \"distance_km\": 50}\n"
+        "  ]\n"
+        "}\n"
+        "~~~\n\n"
+        + "\n\n".join(ctx_parts)
+    )
+
+    return [
+        {"role": "system", "content": POPULATE_MAP_SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+
 def _format_lore_book_block(lore_book: list[dict]) -> str:
     """Format a Lore_Book entry list into a category-grouped text block.
 
@@ -477,6 +532,7 @@ def build_narrative_prompt(
     player_id: str = "player",
     current_time_str: str | None = None,
     scheduled_events: list[dict] | None = None,
+    spatial_context: dict | None = None,
 ) -> list[LLMMessage]:
     """Assemble the full message list for a narrative gameplay turn.
 
@@ -503,6 +559,7 @@ def build_narrative_prompt(
         player_id:              The ID of the player sending the message.
         current_time_str:       Optional formatted time string (e.g. Day 1, 08:00 (Morning)).
         scheduled_events:       Optional list of triggered world events to incorporate.
+        spatial_context:        Optional dict with breadcrumb, description, and neighbors.
 
     Returns:
         list[LLMMessage] ready to pass to any LLMBackend.complete().
@@ -539,6 +596,20 @@ def build_narrative_prompt(
     
     time_header = f"TIME: {current_time_str}\n" if current_time_str else ""
     parts.append(f"CURRENT STATE:\n{time_header}{entity_stats_block}")
+
+    if spatial_context:
+        sc_lines = [f"LOCATION: {spatial_context.get('breadcrumb', 'Unknown')}"]
+        desc = spatial_context.get("description")
+        if desc:
+            sc_lines.append(f"Description: {desc}")
+        
+        neighbors = spatial_context.get("neighbors", [])
+        if neighbors:
+            sc_lines.append("Available connected routes (must move to these nodes):")
+            for n in neighbors:
+                sc_lines.append(f"- {n['name']} (ID: {n['location_id']}, {n['distance_km']} km)")
+        
+        parts.append("\n".join(sc_lines))
 
     if scheduled_events:
         event_lines = ["WORLD EVENTS TRIGGERED:"]

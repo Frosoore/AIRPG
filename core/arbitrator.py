@@ -199,6 +199,13 @@ class ArbitratorEngine:
         total_mins = get_current_time(self._db_path, save_id)
         time_ctx = get_time_of_day_context(total_mins)
 
+        # Spatial Context (Approach A: Hierarchical Breadcrumbs + Neighbors)
+        spatial_ctx = None
+        player_loc_id = filtered_stats.get("player", {}).get("Location")
+        if player_loc_id:
+            from workers.db_helpers import get_spatial_context
+            spatial_ctx = get_spatial_context(self._db_path, player_loc_id)
+
         # Phase 12.1: Fetch triggered scheduled events
         triggered_events = self._fetch_triggered_events(save_id, total_mins)
 
@@ -214,6 +221,7 @@ class ArbitratorEngine:
             player_id=player_entity_id,
             current_time_str=time_ctx,
             scheduled_events=triggered_events,
+            spatial_context=spatial_ctx,
         )
 
         # Step 4 — Clear pending correction immediately after prompt is built
@@ -273,6 +281,22 @@ class ArbitratorEngine:
                 else:
                     payload["value"] = value
                     event_type = "stat_set"
+
+                # Special Case: Location Change -> Log the distance traveled
+                if entity_id == player_entity_id and stat_key == "Location" and value:
+                    old_loc = all_stats.get(entity_id, {}).get("Location")
+                    if old_loc and old_loc != value:
+                        travel_dist = self._get_travel_distance(old_loc, value)
+                        if travel_dist > 0:
+                            # We log the distance in the timeline. The LLM or Rules
+                            # will interpret how much in-game time this distance takes
+                            # based on the narrative context (mode of transport).
+                            with get_connection(self._db_path) as conn:
+                                conn.execute(
+                                    "INSERT INTO Timeline (save_id, turn_id, in_game_time, description) VALUES (?, ?, ?, ?);",
+                                    (save_id, turn_id, total_mins, f"Traveled to {value} ({travel_dist} km)")
+                                )
+                                conn.commit()
 
                 self._event_sourcer.append_event(
                     save_id, turn_id, event_type, entity_id, payload
@@ -597,6 +621,20 @@ class ArbitratorEngine:
                     "content": r["text"]
                 })
         return relevant_lore
+
+    def _get_travel_distance(self, source_id: str, target_id: str) -> int:
+        """Query the distance between two locations in kilometers."""
+        try:
+            with get_connection(self._db_path) as conn:
+                row = conn.execute(
+                    "SELECT distance_km FROM Location_Connections WHERE source_id = ? AND target_id = ?;",
+                    (source_id, target_id)
+                ).fetchone()
+                if row:
+                    return int(row[0])
+        except Exception:
+            pass
+        return 0
 
     def _validate_change(
         self,

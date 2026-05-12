@@ -395,3 +395,24 @@ The specific scenario from the spec — "click Add Entity, type 'Gojo', click Sa
 - **Absolute Pathing:** Corrected icon resolution logic in `airpg.desktop` for better global installation compatibility.
 - **ASCII Aesthetic:** Finalized the removal of emojis and non-standard typography for a cleaner "Senior Engineer" monospaced look.
 
+---
+
+## [PHASE 18 | 2026-05-11] — Spatial Navigation & Hierarchical Mapping (Complete)
+
+### World Map Editor
+- **Multi-Scale Hierarchy**: New dual-pane editor in Creator Studio allowing management of locations from 'Universe' down to 'Building'.
+- **Graph-Based Connections**: Implemented a graphical node-link editor (`QGraphicsScene`) for establishing distances between points.
+- **Visual Editing**: Drag-and-drop node placement with automatic coordinate persistence in the database.
+- **Large Distance Support**: New `ScientificDistanceEntryDialog` added, allowing input of astronomical distances using powers of 10 (e.g., 2 x 10^12 km) for sci-fi universes.
+- **UI UX Improvements**: Added a dedicated 'Connect' toolbar button and 'C' keyboard shortcut. Removed confusing background context menu entries.
+
+### Core Engine Integration
+- **Spatial Prompt Optimization**: Arbitrator now fetches recursive breadcrumbs and immediate neighbors for the player's current location, injecting them as highly compressed context for the LLM.
+- **Kilometer-Based Travel**: Switched from fixed minutes to **Kilometers (km)**. The Arbitrator logs the distance traveled in the timeline, allowing the LLM to interpret travel time based on the narrative context (e.g., warp drive vs walking).
+- **Database Schema Expansion**: Added `Locations` and `Location_Connections` tables with automatic migration logic in `database/schema.py`.
+
+### Technical Integrity & Maintenance
+- **Test Suite Restoration**: Fixed broken `tests/test_arbitrator.py` by updating test setups to match the current `ArbitratorEngine` API and `configure()` pattern.
+- **Vector DB Patching**: Exposed embedding functions in `llm_engine/vector_memory.py` to allow clean mocking in tests while maintaining lazy-loading benefits.
+- **Validation**: Updated `debug/startup_check.py` to verify spatial table presence and worker readiness.
+
