@@ -1,9 +1,9 @@
-# AIRPG — AI Role Playing Game
+# Axiom AI — AI Role Playing Game
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Qt 6](https://img.shields.io/badge/Qt-6-green.svg)](https://www.qt.io/)
 
-**AIRPG** is a local-first, deterministic sandbox RPG engine that bridges the gap between the narrative freedom of Large Language Models (LLMs) and the strict, mathematical logic of traditional RPGs.
+**Axiom AI** is a local-first, deterministic sandbox RPG engine that bridges the gap between the narrative freedom of Large Language Models (LLMs) and the strict, mathematical logic of traditional RPGs.
 
 No cloud servers. No data collection. Absolute player sovereignty.
 
@@ -27,7 +27,7 @@ No cloud servers. No data collection. Absolute player sovereignty.
 
 ## Vision
 
-Traditionally, AI-driven games suffer from "hallucinations" where the AI ignores game rules or character stats. AIRPG solves this using an **Arbitrator** architecture: every narrative turn is validated against a deterministic SQLite state machine before being committed to the timeline.
+Traditionally, AI-driven games suffer from "hallucinations" where the AI ignores game rules or character stats. Axiom AI solves this using an **Arbitrator** architecture: every narrative turn is validated against a deterministic SQLite state machine before being committed to the timeline.
 
 - **Local-First:** Designed for Linux. Your stories and data never leave your machine.
 - **Event Sourced:** Every action is an immutable event. Rewind the timeline to any previous turn with perfect state reconstruction.
@@ -63,8 +63,8 @@ Traditionally, AI-driven games suffer from "hallucinations" where the AI ignores
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/Frosoore/AIRPG.git
-   cd AIRPG
+   git clone https://github.com/Frosoore/AxiomAI.git
+   cd AxiomAI
    ```
 
 2. **Launch the application:**

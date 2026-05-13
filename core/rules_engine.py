@@ -1,7 +1,7 @@
 """
 core/rules_engine.py
 
-JSON-based Rules Engine for AIRPG.
+JSON-based Rules Engine for Axiom AI.
 
 The engine evaluates a set of creator-defined rules against an entity's
 current stats and returns the list of actions that should be applied.

@@ -3,7 +3,7 @@ workers/narrative_worker.py
 
 QThread worker for the Arbitrator narrative turn pipeline.
 
-This is the most critical worker in AIRPG.  It runs the complete
+This is the most critical worker in Axiom AI.  It runs the complete
 ArbitratorEngine.process_turn() off the main thread and communicates progress
 back via signals.
 

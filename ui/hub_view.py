@@ -1,7 +1,7 @@
 """
 ui/hub_view.py
 
-Hub screen - the library home for AIRPG.
+Hub screen - the library home for Axiom AI.
 
 Displays all locally installed universes as a scrollable grid of cards
 and provides Import and Create New controls.
@@ -58,7 +58,7 @@ if TYPE_CHECKING:
 
 
 class HubView(QWidget):
-    """The library home screen listing all installed AIRPG universes.
+    """The library home screen listing all installed Axiom AI universes.
 
     Args:
         main_window: Reference to MainWindow for navigation calls.
@@ -100,7 +100,7 @@ class HubView(QWidget):
         self._import_st_btn = QPushButton(tr("import_st"))
         self._import_st_btn.setToolTip("Import a character card from SillyTavern format.")
         self._import_btn = QPushButton(tr("import"))
-        self._import_btn.setToolTip("Import an existing .airpg universe file.")
+        self._import_btn.setToolTip("Import an existing .axiom universe file.")
         self._create_btn = QPushButton(tr("new_universe"))
         self._create_btn.setToolTip("Create a brand new empty universe.")
         toolbar.addWidget(self._import_st_btn)
@@ -243,13 +243,13 @@ class HubView(QWidget):
     @Slot()
     def _on_import_clicked(self) -> None:
         """Open a file dialog and start ImportExportWorker in import mode."""
-        airpg_path, _ = QFileDialog.getOpenFileName(
+        axiom_ai_path, _ = QFileDialog.getOpenFileName(
             self,
             tr("import"),
             str(Path.home()),
-            "AIRPG Universe (*.airpg);;All Files (*)",
+            "Axiom AI Universe (*.axiom);;All Files (*)",
         )
-        if not airpg_path:
+        if not axiom_ai_path:
             return
 
         self._progress_dialog = QProgressDialog(
@@ -262,7 +262,7 @@ class HubView(QWidget):
 
         self._import_worker = ImportExportWorker(
             mode="import",
-            source_path=airpg_path,
+            source_path=axiom_ai_path,
             dest_path=self._LIBRARY_DIR,
         )
         self._import_worker.import_complete.connect(self._on_import_complete)
@@ -325,8 +325,8 @@ class HubView(QWidget):
         dest_path, _ = QFileDialog.getSaveFileName(
             self,
             tr("export"),
-            str(Path.home() / "universe.airpg"),
-            "AIRPG Universe (*.airpg)",
+            str(Path.home() / "universe.axiom"),
+            "Axiom AI Universe (*.axiom)",
         )
         if not dest_path:
             return

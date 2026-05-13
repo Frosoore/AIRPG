@@ -1,7 +1,7 @@
 """
 core/chronicler.py
 
-The Chronicler Engine — AIRPG's macro-simulation agent.
+The Chronicler Engine — Axiom AI's macro-simulation agent.
 
 The Chronicler simulates the independent evolution of the off-screen world
 (factions, VIP NPCs, cities) without the player's involvement.  It runs

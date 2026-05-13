@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=AIRPG
+Name=Axiom AI
 Comment=AI-Powered Role Playing Game
 Exec=bash -c "cd $(dirname %k) && ./run.sh"
 Icon=assets/icon.svg

@@ -1,36 +1,46 @@
 #!/usr/bin/env bash
 # ============================================================
-# AIRPG — Test Runner (Zero-config fallback)
+# Axiom AI — Test Runner (Zero-config fallback)
 # ============================================================
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-echo "🧪 AIRPG Test Suite Runner"
+echo "🧪 Axiom AI Test Suite Runner"
 echo "--------------------------"
 
-# Try VENV first
-USE_USER_PIP=false
-if python3 -m venv .venv 2>/dev/null; then
-    echo "Using virtual environment (.venv)..."
-    # shellcheck source=/dev/null
-    source .venv/bin/activate
-    PIP_CMD="pip"
+# ── Virtual environment ──────────────────────────────────────
+VENV_DIR=".venv"
+
+# Check if venv exists and is valid for the current location
+RECREATE_VENV=false
+if [ ! -f "$VENV_DIR/bin/activate" ] || [ ! -f "$VENV_DIR/bin/python3" ]; then
+    RECREATE_VENV=true
 else
-    echo "Warning: python3-venv not found. Falling back to system python with --user..."
-    USE_USER_PIP=true
-    PIP_CMD="pip3"
+    # Detect if the venv was moved (hardcoded absolute paths in activate script)
+    VENV_ACTIVATE_PATH=$(bash -c "source \"$VENV_DIR/bin/activate\" 2>/dev/null && echo \$VIRTUAL_ENV" || echo "broken")
+    if [ "$VENV_ACTIVATE_PATH" != "$SCRIPT_DIR/$VENV_DIR" ]; then
+        echo "Virtual environment appears invalid or moved (pointing to '$VENV_ACTIVATE_PATH'). Recreating..."
+        RECREATE_VENV=true
+    fi
 fi
+
+if [ "$RECREATE_VENV" = true ]; then
+    echo "Creating/Repairing virtual environment in $VENV_DIR..."
+    rm -rf "$VENV_DIR"
+    if ! python3 -m venv "$VENV_DIR" 2>/dev/null; then
+        echo "ERROR: Could not create virtual environment. Ensure python3-venv is installed."
+        exit 1
+    fi
+fi
+
+source "$VENV_DIR/bin/activate"
 
 # Install requirements
 echo "Verifying dependencies..."
-if [ "$USE_USER_PIP" = true ]; then
-    $PIP_CMD install -q --user -r requirements.txt -r requirements-dev.txt 2>/dev/null || true
-else
-    $PIP_CMD install -q --upgrade pip
-    $PIP_CMD install -q -r requirements.txt -r requirements-dev.txt
-fi
+python3 -m pip install -q --upgrade pip
+python3 -m pip install -q -r requirements.txt -r requirements-dev.txt
 
 # Determine if we can run GUI tests (Qt)
 PYTEST_CMD="python3 -m pytest"

@@ -1,7 +1,7 @@
 """
 ui/main_window.py
 
-Root application window for AIRPG.
+Root application window for Axiom AI.
 
 Owns a QStackedWidget that hosts the three screens (Hub, Creator Studio,
 Tabletop) and coordinates navigation between them.  Holds the active
@@ -32,7 +32,7 @@ from core.localization import tr
 
 
 class MainWindow(QMainWindow):
-    """Root application window for AIRPG.
+    """Root application window for Axiom AI.
 
     Manages screen navigation via a QStackedWidget and owns the active
     session state (db_path, save_id, turn_id) that persists across navigation.
@@ -194,7 +194,7 @@ class MainWindow(QMainWindow):
         # Help menu
         help_menu = menu_bar.addMenu(tr("menu_help"))
         about_action = QAction(tr("menu_about"), self)
-        about_action.setToolTip("Show information about AIRPG.")
+        about_action.setToolTip("Show information about Axiom AI.")
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
 

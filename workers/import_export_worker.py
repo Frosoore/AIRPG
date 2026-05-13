@@ -1,13 +1,13 @@
 """
 workers/import_export_worker.py
 
-QThread worker for .airpg archive import and export operations.
+QThread worker for .axiom archive import and export operations.
 
 All filesystem and SQLite work is performed off the main thread.
 The main thread receives progress updates and completion notifications
 exclusively via Qt signals.
 
-.airpg archive layout
+.axiom archive layout
 ----------------------
 universe_meta.json  — key-value pairs from Universe_Meta table
 entities.json       — list of entity dicts (entity_id, entity_type, name, stats)
@@ -33,19 +33,19 @@ _FORMAT_VERSION: str = "1.0"
 
 
 class ImportExportWorker(QThread):
-    """Handles .airpg pack/unpack entirely off the main thread.
+    """Handles .axiom pack/unpack entirely off the main thread.
 
     Signals:
         import_complete(str):       Emitted with the new db_path on success.
-        export_complete(str):       Emitted with the output .airpg path.
+        export_complete(str):       Emitted with the output .axiom path.
         progress_update(int, int):  (current_step, total_steps) for progress UI.
         error_occurred(str):        Human-readable error message.
         status_update(str):         Short message for QStatusBar.
 
     Args:
         mode:        "import" or "export".
-        source_path: .airpg file path (import) or .db path (export).
-        dest_path:   Target .db directory (import) or output .airpg path (export).
+        source_path: .axiom file path (import) or .db path (export).
+        dest_path:   Target .db directory (import) or output .axiom path (export).
     """
 
     import_complete = Signal(str)
@@ -88,7 +88,7 @@ class ImportExportWorker(QThread):
     # ------------------------------------------------------------------
 
     def _run_import_st(self) -> None:
-        """Parse a SillyTavern card and provision a new AIRPG universe."""
+        """Parse a SillyTavern card and provision a new Axiom AI universe."""
         self.status_update.emit("Importing SillyTavern card...")
         self.progress_update.emit(0, 4)
         
@@ -155,7 +155,7 @@ class ImportExportWorker(QThread):
                 elif isinstance(alt, dict) and alt.get("message"):
                     all_variants.append(alt["message"].strip())
         
-        # Use AIRPG separator for multiverse first message
+        # Use Axiom AI separator for multiverse first message
         first_msg_meta = "\n\n---VARIANT---\n\n".join(all_variants) if all_variants else ""
 
         meta = {
@@ -264,7 +264,7 @@ class ImportExportWorker(QThread):
     # ------------------------------------------------------------------
 
     def _run_import(self) -> None:
-        """Unpack a .airpg archive and provision a new universe database."""
+        """Unpack a .axiom archive and provision a new universe database."""
         self.status_update.emit("Importing universe…")
         total_steps = 4
 
@@ -276,7 +276,7 @@ class ImportExportWorker(QThread):
                 with zipfile.ZipFile(self._source_path, "r") as zf:
                     zf.extractall(tmp_dir)
             except (zipfile.BadZipFile, OSError) as exc:
-                self.error_occurred.emit(f"Cannot open .airpg file: {exc}")
+                self.error_occurred.emit(f"Cannot open .axiom file: {exc}")
                 return
 
             self.progress_update.emit(1, total_steps)
@@ -287,7 +287,7 @@ class ImportExportWorker(QThread):
             missing = [f for f in required if not (tmp / f).exists()]
             if missing:
                 self.error_occurred.emit(
-                    f"Corrupt .airpg: missing files: {', '.join(missing)}"
+                    f"Corrupt .axiom: missing files: {', '.join(missing)}"
                 )
                 return
 
@@ -412,7 +412,7 @@ class ImportExportWorker(QThread):
     # ------------------------------------------------------------------
 
     def _run_export(self) -> None:
-        """Pack a universe database into a .airpg archive."""
+        """Pack a universe database into a .axiom archive."""
         self.status_update.emit("Exporting universe…")
 
         try:
@@ -446,7 +446,7 @@ class ImportExportWorker(QThread):
                     for json_file in tmp.glob("*.json"):
                         zf.write(json_file, json_file.name)
             except (OSError, zipfile.BadZipFile) as exc:
-                self.error_occurred.emit(f"Failed to write .airpg archive: {exc}")
+                self.error_occurred.emit(f"Failed to write .axiom archive: {exc}")
                 return
 
         self.status_update.emit("Universe exported.")

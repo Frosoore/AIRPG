@@ -1,7 +1,7 @@
 """
 ui/creator_studio_view.py
 
-Creator Studio screen for AIRPG.
+Creator Studio screen for Axiom AI.
 Provides a spreadsheet-like interface for building universe content.
 """
 

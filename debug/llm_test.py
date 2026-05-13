@@ -10,7 +10,7 @@ from core.config import load_config, build_llm_from_config
 from llm_engine.base import LLMMessage
 
 def test_llm():
-    print("--- AIRPG LLM Parameter Test ---")
+    print("--- Axiom AI LLM Parameter Test ---")
     config = load_config()
     print(f"Backend: {config.llm_backend}")
     

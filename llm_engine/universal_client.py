@@ -1,7 +1,7 @@
 """
 llm_engine/universal_client.py
 
-Universal OpenAI-compatible API client for AIRPG.
+Universal OpenAI-compatible API client for Axiom AI.
 Supports any local/remote backend that implements the OpenAI /v1/chat/completions API
 (e.g., LM Studio, KoboldCPP, Ollama, standard OpenAI, etc.).
 """

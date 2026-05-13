@@ -1,12 +1,12 @@
 @echo off
 REM ============================================================
-# AIRPG — Windows test runner
+# Axiom AI — Windows test runner
 REM ============================================================
 SETLOCAL
 
 cd /d "%~dp0"
 
-echo 🧪 AIRPG Test Suite Runner
+echo 🧪 Axiom AI Test Suite Runner
 echo --------------------------
 
 REM Virtual environment check

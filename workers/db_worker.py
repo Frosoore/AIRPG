@@ -1,7 +1,7 @@
 """
 workers/db_worker.py
 
-Stateless Database Task Dispatcher for AIRPG.
+Stateless Database Task Dispatcher for Axiom AI.
 
 Uses QThreadPool and QRunnable (from workers.db_tasks) to execute database
 operations without the state-overwriting risks of a single QThread.

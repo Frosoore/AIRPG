@@ -1,7 +1,7 @@
 """
 workers/hardcore_worker.py
 
-Hardcore mode deletion worker for AIRPG.
+Hardcore mode deletion worker for Axiom AI.
 
 Executes the safe, deterministic file-lock release and irrevocable deletion
 sequence for Hardcore saves after a Player_Death event.
@@ -124,7 +124,7 @@ class HardcoreWorker(QThread):
             self.deletion_failed.emit(
                 f"Cannot delete save: files are still locked by another process.\n"
                 f"Locked: {', '.join(locked_files)}\n\n"
-                "Close any programs accessing these files, then restart AIRPG."
+                "Close any programs accessing these files, then restart Axiom AI."
             )
             return
 

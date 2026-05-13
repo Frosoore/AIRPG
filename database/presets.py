@@ -1,5 +1,5 @@
 """
-Stat Presets for AIRPG Universe Creation.
+Stat Presets for Axiom AI Universe Creation.
 This file contains predefined stat sets for various genres.
 """
 

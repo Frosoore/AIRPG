@@ -1,7 +1,7 @@
 """
 llm_engine/vector_memory.py
 
-Local vector-database memory for AIRPG narrative chunks.
+Local vector-database memory for Axiom AI narrative chunks.
 
 Every piece of narrative embedded here carries a `turn_id` metadata tag.
 This enables the surgical rollback required by the Checkpoint system:

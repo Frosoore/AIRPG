@@ -1,7 +1,7 @@
 """
 core/arbitrator.py
 
-The ArbitratorEngine — AIRPG's deterministic firewall between LLM creativity and
+The ArbitratorEngine — Axiom AI's deterministic firewall between LLM creativity and
 the game's mathematical state.
 
 On every narrative turn the ArbitratorEngine:

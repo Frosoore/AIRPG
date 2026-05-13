@@ -1,7 +1,7 @@
 """
 ui/settings_dialog.py
 
-Settings dialog for AIRPG - LLM backend configuration.
+Settings dialog for Axiom AI - LLM backend configuration.
 
 Allows the user to switch between Ollama (local) and Gemini (cloud),
 configure model names and URLs, and test the connection.

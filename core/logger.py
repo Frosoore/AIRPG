@@ -1,7 +1,7 @@
 """
 core/logger.py
 
-Centralised logging for AIRPG.
+Centralised logging for Axiom AI.
 Provides a unified logger that writes to both console and a persistent file.
 """
 
@@ -12,10 +12,10 @@ from logging.handlers import RotatingFileHandler
 from core.paths import CACHE_DIR
 
 _LOG_DIR = CACHE_DIR
-_LOG_FILE = _LOG_DIR / "airpg.log"
+_LOG_FILE = _LOG_DIR / "axiom_ai.log"
 
-def setup_logger(name: str = "AIRPG") -> logging.Logger:
-    """Initialize and return the global AIRPG logger."""
+def setup_logger(name: str = "Axiom AI") -> logging.Logger:
+    """Initialize and return the global Axiom AI logger."""
     logger = logging.getLogger(name)
     
     # Avoid duplicate handlers if already setup

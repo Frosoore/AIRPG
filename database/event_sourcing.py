@@ -1,7 +1,7 @@
 """
 database/event_sourcing.py
 
-Core Event Sourcing implementation for AIRPG.
+Core Event Sourcing implementation for Axiom AI.
 
 Every state change in the game is recorded as an immutable event in
 Event_Log.  The State_Cache is a performance materialisation derived by
@@ -39,7 +39,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
 
 class EventSourcer:
     """Manages event appending, querying, and State_Cache reconstruction
-    for a single AIRPG universe database.
+    for a single Axiom AI universe database.
 
     Args:
         db_path: Filesystem path to an existing universe .db file created

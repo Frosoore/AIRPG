@@ -2,7 +2,7 @@
 debug/test_audio_crossfade.py
 
 Standalone debug script to verify AmbianceManager cross-fade logic without 
-launching the full AIRPG UI.
+launching the full Axiom AI UI.
 
 Usage:
     python3 debug/test_audio_crossfade.py <tag1> <tag2>

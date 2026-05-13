@@ -1,7 +1,7 @@
 """
 llm_engine/prompt_builder.py
 
-Pure prompt-assembly functions for AIRPG's LLM agents.
+Pure prompt-assembly functions for Axiom AI's LLM agents.
 
 All functions in this module are stateless and side-effect-free.  They
 take structured data and return list[LLMMessage] ready for any LLMBackend.

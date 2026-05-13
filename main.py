@@ -1,7 +1,7 @@
 """
 main.py
 
-AIRPG application entry point.
+Axiom AI application entry point.
 
 Bootstraps the QApplication, installs a global exception handler, and
 launches the MainWindow.  Contains zero business logic.
@@ -246,8 +246,8 @@ def _install_exception_hook() -> None:
     """Install a global sys.excepthook to catch unhandled exceptions.
 
     Any exception that escapes Qt's event loop is:
-      1. Written to ~/.cache/AIRPG/crash_YYYYMMDD_HHMMSS.log with system metadata
-      2. Logged to the persistent airpg.log
+      1. Written to ~/.cache/AxiomAI/crash_YYYYMMDD_HHMMSS.log with system metadata
+      2. Logged to the persistent axiom_ai.log
       3. Shown to the user in a QMessageBox.critical
       4. Exits the application with code 1
     """
@@ -258,7 +258,7 @@ def _install_exception_hook() -> None:
         now = datetime.now()
         timestamp = now.isoformat()
         file_timestamp = now.strftime("%Y%m%d_%H%M%S")
-        crash_log = Path.home() / ".cache" / "AIRPG" / f"crash_{file_timestamp}.log"
+        crash_log = Path.home() / ".cache" / "Axiom AI" / f"crash_{file_timestamp}.log"
         
         py_ver = sys.version.replace("\n", " ")
         plat = platform.platform()
@@ -266,7 +266,7 @@ def _install_exception_hook() -> None:
         tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
         
         header = (
-            f"AIRPG Crash Report\n"
+            f"Axiom AI Crash Report\n"
             f"==================\n"
             f"Timestamp: {timestamp}\n"
             f"Python:    {py_ver}\n"
@@ -291,7 +291,7 @@ def _install_exception_hook() -> None:
         if app is not None:
             QMessageBox.critical(
                 None,
-                "AIRPG — Unexpected Error",
+                "Axiom AI — Unexpected Error",
                 f"<b>An unexpected error occurred:</b><br><br>"
                 f"<code>{exc_type.__name__}: {exc_value}</code><br><br>"
                 f"A crash log has been saved to:<br>"
@@ -322,8 +322,8 @@ def main() -> None:
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    app.setApplicationName("AIRPG")
-    app.setApplicationDisplayName("AIRPG — AI Role Playing Game")
+    app.setApplicationName("Axiom AI")
+    app.setApplicationDisplayName("Axiom AI — AI Role Playing Game")
 
     # Set Window Icon
     from PySide6.QtGui import QIcon

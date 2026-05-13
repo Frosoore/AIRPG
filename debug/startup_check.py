@@ -91,7 +91,7 @@ def check_imports():
 
 def run_checks():
     """Main entry point for startup validation, called by main.py."""
-    print("--- AIRPG Startup Validation ---")
+    print("--- Axiom AI Startup Validation ---")
     
     if not check_db_worker():
         sys.exit(1)

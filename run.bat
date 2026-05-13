@@ -1,12 +1,12 @@
 @echo off
 REM ============================================================
-# AIRPG — Windows launch script
+# Axiom AI — Windows launch script
 REM ============================================================
 SETLOCAL
 
 cd /d "%~dp0"
 
-echo --- AIRPG System Check ---
+echo --- Axiom AI System Check ---
 
 REM Check for python
 where python >nul 2>nul
@@ -43,12 +43,12 @@ pip install -r requirements.txt
 echo Running environment validation...
 python debug/startup_check.py
 
-echo Starting AIRPG...
+echo Starting Axiom AI...
 python main.py %*
 
 if %ERRORLEVEL% neq 0 (
     echo.
-    echo AIRPG exited with an error.
+    echo Axiom AI exited with an error.
     pause
 )
 

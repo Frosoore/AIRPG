@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# AIRPG — Ubuntu/Linux launch script
+# Axiom AI — Ubuntu/Linux launch script
 # Usage: bash run.sh
 #        chmod +x run.sh && ./run.sh
 # ============================================================
@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # ── Prerequisites check ──────────────────────────────────────
-echo "--- AIRPG System Check ---"
+echo "--- Axiom AI System Check ---"
 
 if ! command -v python3 &>/dev/null; then
     echo "ERROR: python3 not found."
@@ -60,8 +60,22 @@ echo "Using Python $PYTHON_VER"
 # ── Virtual environment ──────────────────────────────────────
 VENV_DIR=".venv"
 
-if [ ! -f "$VENV_DIR/bin/activate" ]; then
-    echo "Creating virtual environment in $VENV_DIR..."
+# Check if venv exists and is valid for the current location
+RECREATE_VENV=false
+if [ ! -f "$VENV_DIR/bin/activate" ] || [ ! -f "$VENV_DIR/bin/python3" ]; then
+    RECREATE_VENV=true
+else
+    # Detect if the venv was moved (hardcoded absolute paths in activate script)
+    # We source it in a subshell to see what VIRTUAL_ENV it actually sets
+    VENV_ACTIVATE_PATH=$(bash -c "source \"$VENV_DIR/bin/activate\" 2>/dev/null && echo \$VIRTUAL_ENV" || echo "broken")
+    if [ "$VENV_ACTIVATE_PATH" != "$SCRIPT_DIR/$VENV_DIR" ]; then
+        echo "Virtual environment appears invalid or moved (pointing to '$VENV_ACTIVATE_PATH'). Recreating..."
+        RECREATE_VENV=true
+    fi
+fi
+
+if [ "$RECREATE_VENV" = true ]; then
+    echo "Creating/Repairing virtual environment in $VENV_DIR..."
     rm -rf "$VENV_DIR"
     python3 -m venv "$VENV_DIR"
 fi
@@ -70,9 +84,9 @@ source "$VENV_DIR/bin/activate"
 
 # ── Dependency Installation ──────────────────────────────────
 echo "Verifying Python dependencies (this may take a minute on first run)..."
-# We removed -q to ensure the user sees progress and doesn't assume a hang.
-pip install --upgrade pip
-pip install -r requirements.txt
+# Using 'python3 -m pip' ensures we use the venv's pip after activation
+python3 -m pip install --upgrade pip
+python3 -m pip install -r requirements.txt
 
 # ── Startup Validation ───────────────────────────────────────
 # Run a quick headless check of the environment before launching the GUI
@@ -80,6 +94,6 @@ echo "Running environment validation..."
 python3 debug/startup_check.py
 
 # ── Launch ───────────────────────────────────────────────────
-echo "Starting AIRPG..."
+echo "Starting Axiom AI..."
 # Use exec to replace the shell process with the python process
 exec python3 main.py "$@"

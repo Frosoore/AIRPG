@@ -1,7 +1,7 @@
 """
 database/schema.py
 
-Provisions a fresh AIRPG universe SQLite database with all required tables.
+Provisions a fresh Axiom AI universe SQLite database with all required tables.
 Every universe is stored in a single .db file; this module is the sole authority
 over the schema definition.
 """
@@ -273,7 +273,7 @@ EXPECTED_TABLES: frozenset[str] = frozenset({
 # ---------------------------------------------------------------------------
 
 def create_universe_db(db_path: str) -> None:
-    """Provision a fresh AIRPG universe database at the given path.
+    """Provision a fresh Axiom AI universe database at the given path.
 
     Creates the file (and any missing parent directories) if it does not
     already exist, then executes all DDL statements inside a single

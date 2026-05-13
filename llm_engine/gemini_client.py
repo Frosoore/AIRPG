@@ -3,7 +3,7 @@ llm_engine/gemini_client.py
 
 LLM backend client for Google Gemini models (remote / cloud fallback).
 
-Uses the google-genai SDK (google.genai).  The client translates AIRPG's
+Uses the google-genai SDK (google.genai).  The client translates Axiom AI's
 internal list[LLMMessage] format to Gemini's Content objects: the first
 system-role message becomes the model's system_instruction, and the
 remaining turns become the contents list.
@@ -215,7 +215,7 @@ class GeminiClient(LLMBackend):
         turn that follows them as a prefixed block.
 
         Args:
-            messages: AIRPG internal message list.
+            messages: Axiom AI internal message list.
 
         Returns:
             Tuple of (system_instruction_str_or_None, gemini_contents_list).

@@ -1,7 +1,7 @@
 """
 ui/ambiance_manager.py
 
-Handles cross-fading and dynamic background audio for AIRPG.
+Handles cross-fading and dynamic background audio for Axiom AI.
 Uses two QMediaPlayer instances to seamlessly transition between ambiance tags.
 """
 

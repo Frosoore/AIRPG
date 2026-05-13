@@ -1,7 +1,7 @@
 """
 ui/widgets/map_editor.py
 
-Hierarchical Map Editor for AIRPG's Creator Studio.
+Hierarchical Map Editor for Axiom AI's Creator Studio.
 Features a QTreeView for spatial hierarchy and a QGraphicsView for
 visual node-link editing of distances at the current level.
 """

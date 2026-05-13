@@ -1,7 +1,7 @@
 """
 database/backup_manager.py
 
-Utility for automated AIRPG database backups before destructive operations.
+Utility for automated Axiom AI database backups before destructive operations.
 """
 
 import shutil

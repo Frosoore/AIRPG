@@ -1,7 +1,7 @@
 """
 ui/setup_view.py
 
-Setup screen for AIRPG.
+Setup screen for Axiom AI.
 Replaces the old SessionLobbyDialog with a full-screen 3-tab experience:
 1. Saves (Resume existing)
 2. Persona (Global character templates)

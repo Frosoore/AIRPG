@@ -1,7 +1,7 @@
 """
 workers/db_tasks.py
 
-Atomic, stateless database tasks for AIRPG using QRunnable and QThreadPool.
+Atomic, stateless database tasks for Axiom AI using QRunnable and QThreadPool.
 This eliminates the DbWorker state-overwriting anti-pattern.
 """
 

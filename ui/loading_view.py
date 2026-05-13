@@ -1,7 +1,7 @@
 """
 ui/loading_view.py
 
-Simple loading screen for AIRPG shown during universe transitions.
+Simple loading screen for Axiom AI shown during universe transitions.
 """
 
 from __future__ import annotations

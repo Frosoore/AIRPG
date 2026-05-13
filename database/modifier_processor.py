@@ -1,7 +1,7 @@
 """
 database/modifier_processor.py
 
-Active Modifiers management for AIRPG.
+Active Modifiers management for Axiom AI.
 
 Modifiers are temporary stat adjustments (buffs, debuffs, curses, blessings)
 that automatically expire after a set amount of in-game time (minutes).

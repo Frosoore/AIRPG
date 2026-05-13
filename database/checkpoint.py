@@ -1,7 +1,7 @@
 """
 database/checkpoint.py
 
-Checkpoint and rewind management for AIRPG saves.
+Checkpoint and rewind management for Axiom AI saves.
 
 The CheckpointManager exposes the rewind primitive (deleting future events
 and rebuilding the State_Cache), a save listing helper, and the destructive

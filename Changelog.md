@@ -1,4 +1,4 @@
-# Changelog — AIRPG
+# Changelog — Axiom AI
 
 All notable changes to this project are documented here.
 Format: `[PHASE X | DATE] — Description`
@@ -108,7 +108,7 @@ Format: `[PHASE X | DATE] — Description`
 - `workers/db_worker.py` — QThread: all SQLite reads/writes (6 task types)
 - `workers/vector_worker.py` — QThread: VectorMemory.rollback() on rewind
 - `workers/mini_dico_worker.py` — QThread: siloed Mini-Dico LLM call
-- `workers/import_export_worker.py` — QThread: .airpg pack/unpack
+- `workers/import_export_worker.py` — QThread: .axiom pack/unpack
 - `workers/db_helpers.py` — Sync helper functions for lightweight main-thread reads
 
 ### Threading architecture
@@ -134,7 +134,7 @@ Format: `[PHASE X | DATE] — Description`
 
 ### core/config.py
 - `AppConfig` dataclass with full LLM backend configuration
-- `load_config()` / `save_config()` — JSON persistence at `~/.config/AIRPG/settings.json`; never raises on missing/malformed file
+- `load_config()` / `save_config()` — JSON persistence at `~/.config/axiom_ai/settings.json`; never raises on missing/malformed file
 - `build_llm_from_config()` — factory that returns Ollama or Gemini backend from config
 
 ### ui/settings_dialog.py + workers/connection_test_worker.py
@@ -172,7 +172,7 @@ Format: `[PHASE X | DATE] — Description`
 ### Error handling
 - `MainWindow._check_first_run()`: welcome dialog on first launch
 - `TabletopView._on_worker_error()`: rich Ollama guidance when LLM is unreachable
-- `main.py` global `sys.excepthook`: writes crash log to `~/.cache/AIRPG/crash.log`
+- `main.py` global `sys.excepthook`: writes crash log to `~/.cache/AxiomAI/crash.log`
 
 ### Packaging
 - `requirements.txt` (runtime) and `requirements-dev.txt` (testing)
@@ -392,7 +392,7 @@ The specific scenario from the spec — "click Add Entity, type 'Gojo', click Sa
 
 ### Deployment & Bug Fixes
 - **SVG Icon Fix:** `run.sh` now detects missing `libqt6svg6` system libraries.
-- **Absolute Pathing:** Corrected icon resolution logic in `airpg.desktop` for better global installation compatibility.
+- **Absolute Pathing:** Corrected icon resolution logic in `axiom_ai.desktop` for better global installation compatibility.
 - **ASCII Aesthetic:** Finalized the removal of emojis and non-standard typography for a cleaner "Senior Engineer" monospaced look.
 
 ---

@@ -1,7 +1,7 @@
 """
 core/time_system.py
 
-Flexible time and calendar system for AIRPG.
+Flexible time and calendar system for Axiom AI.
 Allows custom minutes per hour, hours per day, and named months.
 """
 

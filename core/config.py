@@ -1,10 +1,10 @@
 """
 core/config.py
 
-Application configuration model for AIRPG.
+Application configuration model for Axiom AI.
 
 Stores user preferences (LLM backend, model names, API keys, Chronicler
-interval) in a JSON file at ~/.config/AIRPG/settings.json.
+interval) in a JSON file at ~/.config/AxiomAI/settings.json.
 
 This module is pure Python with no UI dependencies — it can be imported
 by workers and backend code safely.
@@ -27,7 +27,7 @@ GLOBAL_DB_FILE: Path = GLOBAL_DB_FILE
 
 @dataclass
 class AppConfig:
-    """User preferences for AIRPG.
+    """User preferences for Axiom AI.
 
     Attributes:
         llm_backend:         Active backend — "universal" or "gemini".

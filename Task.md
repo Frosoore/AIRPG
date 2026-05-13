@@ -1,4 +1,4 @@
-# Task Tracker — AIRPG
+# Task Tracker — Axiom AI
 
 Status legend: `[ ]` To Do · `[~]` In Progress · `[x]` Done
 

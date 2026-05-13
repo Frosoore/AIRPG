@@ -14,7 +14,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from core.localization import tr, SUPPORTED_LANGUAGES, get_translations_dict
 
 def test_all_translations():
-    print("AIRPG Translation Debug Tool")
+    print("Axiom AI Translation Debug Tool")
     print("============================")
     
     # Mock config to test different languages

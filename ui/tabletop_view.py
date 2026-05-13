@@ -1,7 +1,7 @@
 """
 ui/tabletop_view.py
 
-Tabletop screen - the main gameplay interface for AIRPG.
+Tabletop screen - the main gameplay interface for Axiom AI.
 
 Coordinates the three sub-panels (ConstantsSidebar, ChatDisplayWidget,
 MiniDicoPanel) and owns all worker instances for the active session.

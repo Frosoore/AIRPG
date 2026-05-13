@@ -1,7 +1,7 @@
 """
 llm_engine/base.py
 
-Abstract base class and shared data types for all AIRPG LLM backends.
+Abstract base class and shared data types for all Axiom AI LLM backends.
 
 Both the Arbitrator (narrative agent) and the Chronicler (world simulation
 agent) are decoupled from any concrete LLM provider through this interface.
@@ -109,7 +109,7 @@ _JSON_OBJECT_PATTERN: re.Pattern[str] = re.compile(r"(\{.*\})", re.DOTALL)
 # ---------------------------------------------------------------------------
 
 class LLMBackend(ABC):
-    """Abstract interface for all AIRPG LLM provider clients.
+    """Abstract interface for all Axiom AI LLM provider clients.
 
     Concrete subclasses must implement complete(), stream_tokens(), and
     is_available().  The parse_tool_call() helper is provided here and is
