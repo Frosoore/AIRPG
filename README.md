@@ -8,7 +8,9 @@
 No cloud servers. No data collection. Absolute player sovereignty.
 
 ---
-![alt text](assets/main_menu.png "Main Menu")
+![image](assets/main_menu.png "Main Menu")
+![image](assets/in_game.png "In Game")
+![image](assets/creator.png "Creator")
 
 ## Vision
 
