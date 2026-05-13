@@ -124,7 +124,7 @@ We welcome contributions! Whether it's bug fixes, new UI features, or lore templ
 
 ## License
 
-Distributed under the MIT License. See `LICENSE` (to be added) for more information.
+Distributed under the AGPL-3.0 License. See `LICENSE` for more information.
 
 ## Acknowledgments
 
