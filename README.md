@@ -8,11 +8,22 @@
 No cloud servers. No data collection. Absolute player sovereignty.
 
 ---
-<p align="center">
-  <img src="assets/main_menu.png" width="32%" alt="Main Menu" title="Main Menu">
-  <img src="assets/in_game.png" width="32%" alt="In Game" title="In Game">
-  <img src="assets/creator.png" width="32%" alt="Creator" title="Creator">
-</p>
+<table border="0" style="width: 100%;">
+  <tr>
+    <td align="center" width="33%">
+      <b>Main Menu</b><br>
+      <img src="assets/main_menu.png" alt="Main Menu" style="max-width:100%;">
+    </td>
+    <td align="center" width="33%">
+      <b>In Game</b><br>
+      <img src="assets/in_game.png" alt="In Game" style="max-width:100%;">
+    </td>
+    <td align="center" width="33%">
+      <b>Creator Studio</b><br>
+      <img src="assets/creator.png" alt="Creator" style="max-width:100%;">
+    </td>
+  </tr>
+</table>
 
 ## Vision
 
