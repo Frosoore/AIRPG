@@ -8,7 +8,7 @@
 No cloud servers. No data collection. Absolute player sovereignty.
 
 ---
-![alt text](https://github.com/Frosoore/AIRPG/tree/main/assets/main_menu.png "Main Menu")
+![alt text](assets/main_menu.png "Main Menu")
 
 ## Vision
 
