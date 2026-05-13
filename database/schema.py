@@ -66,7 +66,7 @@ _DDL_SAVES = """
 CREATE TABLE IF NOT EXISTS Saves (
     save_id        TEXT PRIMARY KEY,
     player_name    TEXT NOT NULL,
-    difficulty     TEXT NOT NULL CHECK(difficulty IN ('Normal', 'Hardcore')),
+    difficulty     TEXT NOT NULL CHECK(difficulty IN ('Normal', 'Hardcore', 'Companion')),
     last_updated   TEXT NOT NULL,
     player_persona TEXT NOT NULL DEFAULT ''
 );
@@ -488,6 +488,57 @@ def migrate_location_tables(db_path: str) -> None:
                     conn.execute("PRAGMA foreign_keys=ON;")
         
         conn.commit()
+
+
+def migrate_saves_difficulty_constraint(db_path: str) -> None:
+    """Migrate the Saves table to update the difficulty CHECK constraint.
+    
+    To avoid breaking foreign keys in child tables, we MUST NOT rename the 
+    original table to something else (like Saves_Old), because child tables
+    will update their references to point to the new name.
+    
+    Instead, we create a temp table, copy data, drop the original, and 
+    rename temp to original.
+    """
+    with sqlite3.connect(str(db_path)) as conn:
+        # Check current constraint
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='Saves';").fetchone()
+        if not row:
+            return
+        
+        sql = row[0]
+        if "'Companion'" in sql:
+            # Already updated
+            return
+            
+        conn.execute("PRAGMA foreign_keys=OFF;")
+        try:
+            conn.execute("BEGIN TRANSACTION;")
+            
+            # 1. Create temporary table with NEW schema
+            # We replace 'CREATE TABLE IF NOT EXISTS Saves' with 'CREATE TABLE Saves_Temp'
+            new_ddl = _DDL_SAVES.replace("CREATE TABLE IF NOT EXISTS Saves", "CREATE TABLE Saves_Temp")
+            conn.execute(new_ddl)
+            
+            # 2. Copy data
+            conn.execute(
+                "INSERT INTO Saves_Temp (save_id, player_name, difficulty, last_updated, player_persona) "
+                "SELECT save_id, player_name, difficulty, last_updated, player_persona FROM Saves;"
+            )
+            
+            # 3. Drop original table (FKs in child tables now point to a dangling 'Saves')
+            conn.execute("DROP TABLE Saves;")
+            
+            # 4. Rename temp to original (FKs reconnect)
+            conn.execute("ALTER TABLE Saves_Temp RENAME TO Saves;")
+            
+            conn.execute("COMMIT;")
+            print("[SCHEMA] Saves table successfully migrated to support 'Companion' mode.")
+        except Exception as e:
+            conn.execute("ROLLBACK;")
+            print(f"[SCHEMA] Saves constraint migration failed: {e}")
+        finally:
+            conn.execute("PRAGMA foreign_keys=ON;")
 
 
 def get_connection(db_path: str) -> sqlite3.Connection:

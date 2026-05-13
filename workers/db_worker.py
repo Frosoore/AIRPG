@@ -53,7 +53,7 @@ class DbWorker(QObject):
     personas_loaded = Signal(list)
     library_loaded = Signal(list)
     saves_loaded = Signal(list)
-    history_loaded = Signal(list, int)
+    history_loaded = Signal(list, int, str)
     full_universe_loaded = Signal(dict)
     modifiers_ticked = Signal(list)
     variant_updated = Signal(str)
@@ -140,7 +140,7 @@ class DbWorker(QObject):
 
     def load_session_history(self, save_id: str) -> None:
         task = LoadSessionHistoryTask(self._db_path, save_id)
-        task.signals.result.connect(lambda res: self.history_loaded.emit(res[0], res[1]))
+        task.signals.result.connect(lambda res: self.history_loaded.emit(res[0], res[1], res[2]))
         self._setup_task(task)
 
     def switch_narrative_variant(self, save_id: str, turn_id: int, index: int) -> None:
@@ -472,8 +472,13 @@ class DbWorker(QObject):
                     # 8. History
                     history = []
                     max_tid = 0
+                    difficulty = "Normal"
                     if save_id:
-                        h_rows = conn.execute("SELECT turn_id, event_type, payload FROM Event_Log WHERE save_id = ? AND event_type IN ('user_input', 'narrative_text') ORDER BY event_id ASC;", (save_id,)).fetchall()
+                        # Fetch difficulty
+                        d_row = conn.execute("SELECT difficulty FROM Saves WHERE save_id = ?;", (save_id,)).fetchone()
+                        if d_row: difficulty = d_row[0]
+
+                        h_rows = conn.execute("SELECT turn_id, event_type, payload FROM Event_Log WHERE save_id = ? AND event_type IN ('user_input', 'narrative_text', 'hero_intent') ORDER BY event_id ASC;", (save_id,)).fetchall()
                         for row in h_rows:
                             max_tid = max(max_tid, row[0])
                             history.append({"turn_id": row[0], "event_type": row[1], "payload": json.loads(row[2])})
@@ -486,7 +491,7 @@ class DbWorker(QObject):
                     conn_rows = conn.execute("SELECT source_id, target_id, distance_km FROM Location_Connections;").fetchall()
                     connections = [dict(r) for r in conn_rows]
                             
-                return entities, rules, lore, meta, stat_defs, scheduled_events, story_setup, history, max_tid, locations, connections
+                return entities, rules, lore, meta, stat_defs, scheduled_events, story_setup, history, max_tid, locations, connections, difficulty
 
         task = TempTask(self._db_path, save_id)
         task.signals.result.connect(self._on_load_full_universe_result)
@@ -513,9 +518,10 @@ class DbWorker(QObject):
             "connections": res[10]
         })
         
-        # history (res[7]) and max_tid (res[8])
+        # history (res[7]), max_tid (res[8]), difficulty (res[11])
         if len(res) > 7 and res[7] is not None:
-            self.history_loaded.emit(res[7], res[8])
+            diff = res[11] if len(res) > 11 else "Normal"
+            self.history_loaded.emit(res[7], res[8], diff)
 
     def load_global_personas(self) -> None:
         class TempTask(LoadStatsTask):

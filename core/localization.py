@@ -238,6 +238,7 @@ _TRANSLATIONS = {
         "action_set_status": "Set Status",
         "normal": "Normal",
         "hardcore": "Hardcore",
+        "companion": "Companion",
         "add_category_tooltip": "Add a new lore category",
         "tab_map": "Map",
         "hierarchy": "Hierarchy",
@@ -470,6 +471,7 @@ _TRANSLATIONS = {
         "action_set_status": "Fixer Statut",
         "normal": "Normal",
         "hardcore": "Hardcore",
+        "companion": "Compagnon",
         "add_category_tooltip": "Ajouter une nouvelle catégorie",
         "tab_map": "Carte",
         "hierarchy": "Hiérarchie",
@@ -695,7 +697,8 @@ _TRANSLATIONS = {
         "action_set_status": "Ajustar Estado",
         "normal": "Normal",
         "hardcore": "Hardcore",
-        "add_category_tooltip": "Añadir una nueva categoría de lore",
+        "companion": "Compañero",
+        "add_category_tooltip": "Añadir una nueva categoría",
     },
     "de": {
         "app_title": "AIRPG - KI-Rollenspiel",
@@ -903,7 +906,8 @@ _TRANSLATIONS = {
         "action_set_status": "Status setzen",
         "normal": "Normal",
         "hardcore": "Hardcore",
-        "add_category_tooltip": "Neue Lore-Kategorie hinzufügen",
+        "companion": "Gefährte",
+        "add_category_tooltip": "Neue Kategorie hinzufügen",
     },
     "it": {
         "app_title": "AIRPG - Gioco di Ruolo con IA",
@@ -1111,7 +1115,8 @@ _TRANSLATIONS = {
         "action_set_status": "Imposta Stato",
         "normal": "Normale",
         "hardcore": "Hardcore",
-        "add_category_tooltip": "Aggiungi una nuova categoria di lore",
+        "companion": "Compagno",
+        "add_category_tooltip": "Aggiungi una nuova categoria",
     },
     "pt": {
         "app_title": "AIRPG - Jogo de RPG por IA",
@@ -1319,7 +1324,8 @@ _TRANSLATIONS = {
         "action_set_status": "Definir Status",
         "normal": "Normal",
         "hardcore": "Hardcore",
-        "add_category_tooltip": "Adicionar uma nova categoria de lore",
+        "companion": "Companheiro",
+        "add_category_tooltip": "Adicionar nova categoria",
     },
     "ru": {
         "app_title": "AIRPG - Ролевая игра с ИИ",
@@ -1527,7 +1533,8 @@ _TRANSLATIONS = {
         "action_set_status": "Установка статуса",
         "normal": "Обычный",
         "hardcore": "Хардкор",
-        "add_category_tooltip": "Добавить новую категорию лора",
+        "companion": "Спутник",
+        "add_category_tooltip": "Добавить категорию",
     },
     "zh": {
         "app_title": "AIRPG - AI 角色扮演游戏",
@@ -1735,7 +1742,8 @@ _TRANSLATIONS = {
         "action_set_status": "设置状态",
         "normal": "普通",
         "hardcore": "硬核",
-        "add_category_tooltip": "添加新的传记类别",
+        "companion": "伙伴",
+        "add_category_tooltip": "添加新类别",
     },
     "ja": {
         "app_title": "AIRPG - AIロールプレイングゲーム",
@@ -1943,7 +1951,8 @@ _TRANSLATIONS = {
         "action_set_status": "状態設定",
         "normal": "ノーマル",
         "hardcore": "ハードコア",
-        "add_category_tooltip": "新しいロアカテゴリを追加",
+        "companion": "コンパニオン",
+        "add_category_tooltip": "新しいカテゴリを追加",
     },
     "ko": {
         "app_title": "AIRPG - AI 롤플레잉 게임",
@@ -2151,7 +2160,8 @@ _TRANSLATIONS = {
         "action_set_status": "상태 설정",
         "normal": "일반",
         "hardcore": "하드코어",
-        "add_category_tooltip": "새로운세계관카테고리추가",
+        "companion": "동반자",
+        "add_category_tooltip": "새 카테고리 추가",
     }
 }
 

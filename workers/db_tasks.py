@@ -144,11 +144,15 @@ class LoadSessionHistoryTask(BaseDbTask):
         super().__init__(db_path)
         self.save_id = save_id
 
-    def execute(self) -> tuple[list[dict], int]:
+    def execute(self) -> tuple[list[dict], int, str]:
         with get_connection(self.db_path) as conn:
+            # Fetch difficulty
+            row = conn.execute("SELECT difficulty FROM Saves WHERE save_id = ?;", (self.save_id,)).fetchone()
+            difficulty = row[0] if row else "Normal"
+
             rows = conn.execute(
                 "SELECT turn_id, event_type, payload FROM Event_Log "
-                "WHERE save_id = ? AND event_type IN ('user_input', 'narrative_text') "
+                "WHERE save_id = ? AND event_type IN ('user_input', 'narrative_text', 'hero_intent') "
                 "ORDER BY event_id ASC;",
                 (self.save_id,)
             ).fetchall()
@@ -163,7 +167,7 @@ class LoadSessionHistoryTask(BaseDbTask):
                 "event_type": row[1],
                 "payload": json.loads(row[2])
             })
-        return history, max_turn_id
+        return history, max_turn_id, difficulty
 
 
 class UpdateVariantTask(BaseDbTask):

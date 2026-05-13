@@ -89,6 +89,8 @@ class TabletopView(HardcoreMixin, QWidget):
         self._player_persona: str = ""
         self._setup_answers: dict[str, str] = {}
         self._history: list = []
+        self._mode: str = "Normal"
+        self._entities: list[dict] = []
         self._lore_book: list[dict] = []
         self._llm_temperature: float = 0.7
         self._llm_top_p: float = 1.0
@@ -341,11 +343,12 @@ class TabletopView(HardcoreMixin, QWidget):
     # Slots (Initialisation)
     # ------------------------------------------------------------------
 
-    @Slot(list, int)
-    def _on_history_loaded(self, history: list, turn_id: int) -> None:
+    @Slot(list, int, str)
+    def _on_history_loaded(self, history: list, turn_id: int, difficulty: str) -> None:
         """Background history fetch finished; display it and check for 1st msg."""
         self._history = history
         self._turn_id = turn_id
+        self._mode = difficulty
         self._history_loaded = True
         self._turn_label.setText(tr("turn_fmt", count=turn_id))
         self._chat.rebuild_from_history(history)
@@ -396,6 +399,7 @@ class TabletopView(HardcoreMixin, QWidget):
     @Slot(list)
     def _on_entities_loaded(self, entities: list[dict]) -> None:
         """Entities fetch finished; populate player selector."""
+        self._entities = entities
         self._player_selector.blockSignals(True)
         self._player_selector.clear()
         players = [e for e in entities if e.get("entity_type") == "player"]
@@ -551,8 +555,11 @@ class TabletopView(HardcoreMixin, QWidget):
             temperature=self._llm_temperature,
             top_p=self._llm_top_p,
             verbosity=self._llm_verbosity,
-            current_time=self._current_time
+            current_time=self._current_time,
+            mode=self._mode,
+            entities=self._entities
         )
+        self._narrative_worker.hero_decision_received.connect(self._chat.append_hero_intent)
         self._narrative_worker.token_received.connect(self._chat.append_token)
         self._narrative_worker.turn_complete.connect(self._on_turn_complete)
         self._narrative_worker.error_occurred.connect(self._on_worker_error)

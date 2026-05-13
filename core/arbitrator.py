@@ -97,6 +97,8 @@ class ArbitratorEngine:
         self._llm: LLMBackend | None = None
         self._vector_memory: VectorMemory | None = None
         self._pending_correction: str | None = None
+        self._mode: str = "Normal"
+        self._hero_entity_id: str | None = None
 
     def configure(self, llm: LLMBackend, vector_memory: VectorMemory) -> None:
         """Inject runtime dependencies before process_turn."""
@@ -119,6 +121,9 @@ class ArbitratorEngine:
         temperature: float = 0.7,
         top_p: float = 1.0,
         verbosity_level: str = "balanced",
+        hero_action: str | None = None,
+        hero_entity_id: str | None = None,
+        mode: str = "Normal",
     ) -> ArbitratorResult:
         """Execute one full ArbitratorEngine turn and return the result.
 
@@ -134,6 +139,9 @@ class ArbitratorEngine:
             temperature:             Sampling temperature (0.0 to 1.0).
             top_p:                   Nucleus sampling parameter (0.0 to 1.0).
             verbosity_level:         'short', 'balanced', or 'talkative'.
+            hero_action:             Optional intended action for the AI Hero.
+            hero_entity_id:          Optional ID of the AI Hero entity.
+            mode:                    Game mode ('Normal', 'Hardcore', 'Companion').
 
         Returns:
             ArbitratorResult containing narrative text and all change outcomes.
@@ -141,11 +149,20 @@ class ArbitratorEngine:
         Raises:
             LLMConnectionError: If the LLM backend is unreachable.
         """
+        self._mode = mode
+        self._hero_entity_id = hero_entity_id
         # Step 0 — Log user message event
         self._event_sourcer.append_event(
             save_id, turn_id, "user_input", player_entity_id,
             {"text": user_message}
         )
+        
+        # Companion Mode: Log hero intent
+        if hero_action:
+            self._event_sourcer.append_event(
+                save_id, turn_id, "hero_intent", hero_entity_id or "hero",
+                {"text": hero_action}
+            )
 
         # Step 1 — Fetch and overlay stats for all active entities
         all_stats = self._fetch_effective_stats(save_id)
@@ -222,6 +239,7 @@ class ArbitratorEngine:
             current_time_str=time_ctx,
             scheduled_events=triggered_events,
             spatial_context=spatial_ctx,
+            hero_action=hero_action,
         )
 
         # Step 4 — Clear pending correction immediately after prompt is built
@@ -706,6 +724,12 @@ class ArbitratorEngine:
         # Enforce non-negativity if it's a numeric resource
         if current_val is not None and result_val is not None:
             if current_val >= 0 and result_val < 0:
+                # COMPANION MODE: Hero has Plot Armor (cannot drop below 0 for critical resources)
+                if self._mode == "Companion" and entity_id == self._hero_entity_id:
+                    # Allow it but set to 0 instead of rejecting, or just ignore the reduction
+                    # Here we silently cap at 0 to ensure the turn proceeds but the hero survives.
+                    return True, ""
+                
                 return False, (
                     f"the player does not have enough {stat_key} (current: {current_val:.0f})"
                 )

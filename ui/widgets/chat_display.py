@@ -209,6 +209,25 @@ class ChatDisplayWidget(QWidget):
         cursor.insertText(f"{text}\n\n", fmt)
         self._reset_states()
 
+    def append_hero_intent(self, text: str):
+        """Display the AI Hero's intended action in a distinct style."""
+        cursor = self._narrative_display.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        
+        # Header "HERO INTENT"
+        header_fmt = QTextCharFormat()
+        header_fmt.setForeground(QColor("#FFB000")) # Amber
+        header_fmt.setFontWeight(QFont.Weight.Bold)
+        cursor.insertText("[HERO INTENT]: ", header_fmt)
+        
+        # The intent text itself
+        text_fmt = QTextCharFormat()
+        text_fmt.setForeground(QColor("#FFD54F")) # Light Amber
+        text_fmt.setFontItalic(True)
+        cursor.insertText(f"{text}\n\n", text_fmt)
+        
+        self._reset_states()
+
     def append_assistant_separator(self):
         self._reset_states()
         cursor = self._narrative_display.textCursor()
@@ -401,6 +420,9 @@ class ChatDisplayWidget(QWidget):
                 if evt_type == 'user_input':
                     text_payload = payload.get("text", "") if isinstance(payload, dict) else str(payload)
                     self.append_user_message(text_payload)
+                elif evt_type == 'hero_intent':
+                    text_payload = payload.get("text", "") if isinstance(payload, dict) else str(payload)
+                    self.append_hero_intent(text_payload)
                 elif evt_type == 'narrative_text':
                     active_idx = 0
                     total_vars = 1

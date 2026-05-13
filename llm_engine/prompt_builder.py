@@ -190,6 +190,39 @@ CRITICAL RULES:
 2. Generate a compelling name, foundational lore, and a welcoming first message.
 """
 
+HERO_SYSTEM_PROMPT = """\
+You are the Hero of this story. You are an autonomous protagonist.
+Your role is to decide your next action based on the current situation and the Companion's (user) input.
+
+RULES:
+- Be proactive and heroic (or according to your persona).
+- Respond ONLY with your action in one or two sentences.
+- Do NOT roleplay as the Companion or the Narrator.
+- Speak in the first person if you are describing your intent, or third person for your action.
+"""
+
+def build_hero_decision_prompt(
+    hero_name: str,
+    hero_persona: str,
+    hero_stats: str,
+    history: list[LLMMessage],
+    user_message: str,
+) -> list[LLMMessage]:
+    """Assemble the prompt for the Hero IA to decide its next action."""
+    user_content = (
+        f"HERO NAME: {hero_name}\n"
+        f"HERO PERSONA: {hero_persona}\n"
+        f"HERO STATS:\n{hero_stats}\n\n"
+        "DECIDE YOUR NEXT ACTION.\n"
+        f"COMPANION SAYS/DOES: {user_message}"
+    )
+    
+    # We include a few turns of history for context
+    messages = [{"role": "system", "content": HERO_SYSTEM_PROMPT}]
+    messages.extend(history[-4:]) # Last 2 turns
+    messages.append({"role": "user", "content": user_content})
+    return messages
+
 def build_populate_meta_prompt(
     current_meta: dict,
     custom_instruction: str | None = None
@@ -533,6 +566,7 @@ def build_narrative_prompt(
     current_time_str: str | None = None,
     scheduled_events: list[dict] | None = None,
     spatial_context: dict | None = None,
+    hero_action: str | None = None,
 ) -> list[LLMMessage]:
     """Assemble the full message list for a narrative gameplay turn.
 
@@ -543,6 +577,7 @@ def build_narrative_prompt(
       2. user/assistant pairs — capped prior history (newest HISTORY_TURN_CAP turns)
       3. system  — pending correction (only if not None)
       4. user    — the player's current input (with optional RAG context prepended)
+      5. hero    — optional hero's intended action (only if not None)
 
     Args:
         universe_system_prompt: The universe's foundational system prompt.
@@ -560,6 +595,7 @@ def build_narrative_prompt(
         current_time_str:       Optional formatted time string (e.g. Day 1, 08:00 (Morning)).
         scheduled_events:       Optional list of triggered world events to incorporate.
         spatial_context:        Optional dict with breadcrumb, description, and neighbors.
+        hero_action:            Optional intended action for the AI Hero.
 
     Returns:
         list[LLMMessage] ready to pass to any LLMBackend.complete().
@@ -576,6 +612,9 @@ def build_narrative_prompt(
         f"- Identity: You are the narrator. Never speak or act for {player_id}.",
         f"- Termination: Stop immediately before {player_id} would react."
     ]
+
+    if hero_action:
+        rules.append("- PLOT ARMOR: The main Hero (controlled by IA) has narrative protection. Favor their success and survival.")
     
     len_map = {
         "short": "CONCISE (2 sentences).",
@@ -641,6 +680,9 @@ def build_narrative_prompt(
         final_user_content = f"{rag_section}\n\n---\n\n{user_message}"
     else:
         final_user_content = user_message
+
+    if hero_action:
+        final_user_content += f"\n\n[HERO INTENT]: {hero_action}"
 
     messages.append({"role": "user", "content": final_user_content})
 

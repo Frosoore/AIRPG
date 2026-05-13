@@ -78,7 +78,13 @@ class UniverseCard(QFrame):
         layout.addWidget(self._updated_label)
 
         # Difficulty badge
-        badge_color = "#c0392b" if self._difficulty == "Hardcore" else "#27ae60"
+        if self._difficulty == "Hardcore":
+            badge_color = "#c0392b" # Red
+        elif self._difficulty == "Companion":
+            badge_color = "#2980b9" # Blue
+        else:
+            badge_color = "#27ae60" # Green
+        
         self._difficulty_label = QLabel(tr(self._difficulty.lower()))
         self._difficulty_label.setStyleSheet(
             f"background: {badge_color}; color: white; "

@@ -166,11 +166,20 @@ class CreatorStudioView(QWidget):
         self._top_p_label_row = QLabel("LLM Top P:")
         tension_form.addRow(self._top_p_label_row, self._top_p_spin)
 
-        from PySide6.QtWidgets import QComboBox
+        from PySide6.QtWidgets import QComboBox, QCheckBox
         self._verbosity_combo = QComboBox()
         self._verbosity_combo.addItems([tr("short"), tr("balanced"), tr("talkative")])
         self._verbosity_label_row = QLabel(f"{tr('verbosity')}:")
         tension_form.addRow(self._verbosity_label_row, self._verbosity_combo)
+
+        # Companion Mode Feature
+        self._companion_group = QGroupBox(tr("companion_feature"))
+        companion_layout = QFormLayout(self._companion_group)
+        self._companion_enabled_check = QCheckBox(tr("enable_companion_mode"))
+        self._companion_hero_combo = QComboBox()
+        companion_layout.addRow(self._companion_enabled_check)
+        companion_layout.addRow(tr("main_hero"), self._companion_hero_combo)
+        layout.addWidget(self._companion_group)
 
         layout.addWidget(self._tension_group)
         layout.addStretch()
@@ -213,6 +222,9 @@ class CreatorStudioView(QWidget):
         self._lore_book_editor.retranslate_ui()
         self._scheduled_events_editor.retranslate_ui()
         self._story_setup_editor.retranslate_ui()
+        
+        self._companion_group.setTitle(tr("companion_feature"))
+        self._companion_enabled_check.setText(tr("enable_companion_mode"))
 
     def load_universe(self, db_path: str) -> None:
         self._db_path = db_path
@@ -230,8 +242,17 @@ class CreatorStudioView(QWidget):
     def _on_full_universe_loaded(self, data: dict) -> None:
         sdefs = data.get("stat_definitions", [])
         self._stat_editor.populate(sdefs)
-        self._entity_editor.populate(data.get("entities", []))
+        
+        entities = data.get("entities", [])
+        self._entity_editor.populate(entities)
         self._entity_editor.set_stat_definitions(sdefs)
+        
+        # Populate Hero Selector
+        self._companion_hero_combo.clear()
+        for e in entities:
+            name = e.get("name", e["entity_id"])
+            self._companion_hero_combo.addItem(name, e["entity_id"])
+
         self._rule_editor.populate(data.get("rules", []))
         self._rule_editor.set_stat_definitions(sdefs)
         self._lore_book_editor.populate(data.get("lore_book", []))
@@ -262,6 +283,8 @@ class CreatorStudioView(QWidget):
             "llm_temperature": str(self._temp_spin.value()),
             "llm_top_p": str(self._top_p_spin.value()),
             "llm_verbosity": self._verbosity_combo.currentText().lower(),
+            "companion_mode_enabled": "1" if self._companion_enabled_check.isChecked() else "0",
+            "companion_hero_id": self._companion_hero_combo.currentData() or "",
             "calendar_config": cal_meta.get("calendar_config", "{}")
         }
 
@@ -335,6 +358,16 @@ class CreatorStudioView(QWidget):
                 idx = i
                 break
         self._verbosity_combo.setCurrentIndex(max(0, idx))
+
+        # Companion Feature
+        enabled = meta.get("companion_mode_enabled") == "1"
+        self._companion_enabled_check.setChecked(enabled)
+        
+        hero_id = meta.get("companion_hero_id", "")
+        if hero_id:
+            h_idx = self._companion_hero_combo.findData(hero_id)
+            if h_idx >= 0:
+                self._companion_hero_combo.setCurrentIndex(h_idx)
 
     @Slot()
     def _on_back_clicked(self) -> None:

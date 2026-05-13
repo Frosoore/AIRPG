@@ -10,6 +10,7 @@ test_vector_memory.py to avoid model downloads.
 """
 
 import hashlib
+import json
 import math
 import random
 import sqlite3
@@ -553,4 +554,70 @@ class TestDynamicStopSequences:
         assert "\nplayer1:" in llm.passed_stops
         assert "\n[player1]" in llm.passed_stops
         assert "\nUser:" in llm.passed_stops
+
+
+# ---------------------------------------------------------------------------
+# process_turn — Companion Mode (Asymmetric Gameplay)
+# ---------------------------------------------------------------------------
+
+class TestCompanionMode:
+    def test_plot_armor_prevents_rejection(self, db_path, vm) -> None:
+        # Create a Hero NPC via EventSourcer for correct State_Cache integration
+        from database.event_sourcing import EventSourcer
+        es = EventSourcer(db_path)
+        es.append_event("s1", 0, "entity_create", "hero1",
+                        {"entity_id": "hero1", "entity_type": "npc", "name": "Legendary Hero"})
+        es.append_event("s1", 0, "stat_change", "hero1",
+                        {"entity_id": "hero1", "stat_key": "HP", "delta": 10})
+        es.rebuild_state_cache("s1")
+
+        # Try to deduct 20 HP from Hero (current HP=10)
+        response = LLMResponse(
+            narrative_text="The hero is hit hard.",
+            tool_call={"state_changes": [
+                {"entity_id": "hero1", "stat_key": "HP", "delta": -20}
+            ]},
+            finish_reason="stop",
+        )
+        
+        arb, _ = _make_arbitrator(db_path, vm, response)
+        
+        # In Companion mode, this should be ALLOWED (valid=True) due to Plot Armor
+        result = arb.process_turn(
+            "s1", 1, "watch", "sys", [], 
+            mode="Companion", 
+            hero_entity_id="hero1"
+        )
+        
+        assert len(result.applied_changes) == 1
+        assert len(result.rejected_changes) == 0
+
+    def test_hero_action_included_in_prompt_and_logged(self, db_path, vm) -> None:
+        response = LLMResponse("OK", None, "stop")
+        arb, llm = _make_arbitrator(db_path, vm, response)
+        
+        arb.process_turn(
+            "s1", 1, "companion action", "sys", [], 
+            hero_action="Hero charges forward!",
+            mode="Companion",
+            hero_entity_id="hero1"
+        )
+        
+        # 1. Check messages sent to LLM
+        found = False
+        for msg in llm.last_messages:
+            if "[HERO INTENT]: Hero charges forward!" in msg["content"]:
+                found = True
+        assert found
+
+        # 2. Check Event_Log
+        with sqlite3.connect(db_path) as conn:
+            row = conn.execute(
+                "SELECT event_type, target_entity, payload FROM Event_Log "
+                "WHERE event_type = 'hero_intent';"
+            ).fetchone()
+            assert row is not None
+            assert row[0] == "hero_intent"
+            assert row[1] == "hero1"
+            assert json.loads(row[2])["text"] == "Hero charges forward!"
 

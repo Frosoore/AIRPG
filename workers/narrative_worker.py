@@ -36,6 +36,7 @@ class NarrativeWorker(QThread):
     """
 
     token_received = Signal(str)
+    hero_decision_received = Signal(str)
     turn_complete = Signal(object)
     error_occurred = Signal(str)
     status_update = Signal(str)
@@ -54,7 +55,9 @@ class NarrativeWorker(QThread):
         temperature: float = 0.7,
         top_p: float = 1.0,
         verbosity: str = "balanced",
-        current_time: int = 0
+        current_time: int = 0,
+        mode: str = "Normal",
+        entities: list[dict] | None = None
     ) -> None:
         super().__init__()
         self._llm = llm
@@ -70,6 +73,8 @@ class NarrativeWorker(QThread):
         self._top_p = top_p
         self._verbosity = verbosity
         self._current_time = current_time
+        self._mode = mode
+        self._entities = entities or []
 
     def run(self) -> None:
         """Execute the Arbitrator turn pipeline.  Never raises."""
@@ -89,6 +94,22 @@ class NarrativeWorker(QThread):
                     text = payload.get("variants")[payload.get("active")] if isinstance(payload, dict) else str(payload)
                     llm_history.append({"role": "assistant", "content": text})
 
+            # --- HERO IA DECISION (Companion Mode) ---
+            hero_action = None
+            hero_id = None
+            if self._mode == "Companion":
+                self.status_update.emit("Consulting Hero IA…")
+                
+                # Fetch hero_id from metadata or fallback to discovery
+                hero_id = self._get_hero_id_from_metadata()
+                hero_ent = self._find_hero_entity(hero_id)
+                
+                if hero_ent:
+                    hero_id = hero_ent["entity_id"]
+                    hero_action = self._get_hero_decision(hero_ent, llm_history)
+                    self.hero_decision_received.emit(hero_action)
+                    self.status_update.emit(f"Hero decides: {hero_action[:30]}…")
+
             result: ArbitratorResult = self._arbitrator.process_turn(
                 save_id=self._save_id,
                 turn_id=self._turn_id,
@@ -100,6 +121,9 @@ class NarrativeWorker(QThread):
                 temperature=self._temperature,
                 top_p=self._top_p,
                 verbosity_level=self._verbosity,
+                hero_action=hero_action,
+                hero_entity_id=hero_id,
+                mode=self._mode,
             )
 
             self.turn_complete.emit(result)
@@ -113,3 +137,58 @@ class NarrativeWorker(QThread):
         except Exception as exc:
             self.error_occurred.emit(f"Unexpected error during turn: {exc}")
             self.status_update.emit("Error.")
+
+    def _get_hero_id_from_metadata(self) -> str | None:
+        """Fetch the hero ID configured in universe metadata."""
+        from workers.db_helpers import get_connection
+        try:
+            with get_connection(self._arbitrator._db_path) as conn:
+                row = conn.execute(
+                    "SELECT value FROM Universe_Meta WHERE key = 'companion_hero_id';"
+                ).fetchone()
+                return row[0] if row and row[0] else None
+        except Exception:
+            return None
+
+    def _find_hero_entity(self, target_id: str | None = None) -> dict | None:
+        """Locate the main Hero entity in the universe."""
+        if target_id:
+            for e in self._entities:
+                if e["entity_id"] == target_id:
+                    return e
+
+        # Fallback to discovery
+        # 1. Look for explicit ID 'hero'
+        for e in self._entities:
+            if e["entity_id"].lower() == "hero":
+                return e
+        # 2. Look for name containing 'Hero'
+        for e in self._entities:
+            if "hero" in e.get("name", "").lower():
+                return e
+        # 3. Fallback to first NPC if any
+        for e in self._entities:
+            if e.get("entity_type") == "npc":
+                return e
+        return None
+
+    def _get_hero_decision(self, hero_ent: dict, history: list) -> str:
+        """Call a local LLM to decide the Hero's action."""
+        from core.config import load_config, build_llm_from_config
+        from llm_engine.prompt_builder import build_hero_decision_prompt, format_entity_stats_block
+        
+        cfg = load_config()
+        # Explicitly use local model for Hero if premium is selected globally
+        hero_llm = build_llm_from_config(cfg, model_override=cfg.extraction_model)
+        
+        hero_stats = format_entity_stats_block([hero_ent])
+        prompt = build_hero_decision_prompt(
+            hero_name=hero_ent.get("name", "Hero"),
+            hero_persona=hero_ent.get("description", ""),
+            hero_stats=hero_stats,
+            history=history,
+            user_message=self._action.text
+        )
+        
+        resp = hero_llm.complete(prompt, max_tokens=100)
+        return resp.narrative_text.strip()

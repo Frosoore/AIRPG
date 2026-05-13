@@ -166,7 +166,9 @@ class SetupView(QWidget):
         form.addRow(tr("save_name"), self._new_player_name)
         
         self._difficulty_combo = QComboBox()
-        self._difficulty_combo.addItems(["Normal", "Hardcore"])
+        self._difficulty_combo.addItem(tr("normal"), "Normal")
+        self._difficulty_combo.addItem(tr("hardcore"), "Hardcore")
+        self._difficulty_combo.addItem(tr("companion"), "Companion")
         form.addRow(tr("difficulty"), self._difficulty_combo)
         
         layout.addLayout(form)
@@ -241,6 +243,16 @@ class SetupView(QWidget):
     def _on_universe_loaded(self, data: dict) -> None:
         self._setup_configs = data.get("story_setup", [])
         self._build_dynamic_setup()
+        
+        # Check Companion support
+        meta = data.get("meta", {})
+        companion_enabled = meta.get("companion_mode_enabled") == "1"
+        
+        self._difficulty_combo.clear()
+        self._difficulty_combo.addItem(tr("normal"), "Normal")
+        self._difficulty_combo.addItem(tr("hardcore"), "Hardcore")
+        if companion_enabled:
+            self._difficulty_combo.addItem(tr("companion"), "Companion")
 
     def _build_dynamic_setup(self) -> None:
         for config in self._setup_configs:
@@ -367,10 +379,9 @@ class SetupView(QWidget):
                     return
                 answers[sid] = ", ".join(selected)
 
-        diff = self._difficulty_combo.currentText()
-        
-        save_id = create_new_save(self._db_path, name, diff, player_persona=persona)
-        
+        diff = self._difficulty_combo.currentData()
+
+        save_id = create_new_save(self._db_path, name, diff, player_persona=persona)        
         self._main_window.show_tabletop(
             self._db_path, save_id, player_persona=persona, setup_answers=answers
         )
