@@ -8,9 +8,11 @@
 No cloud servers. No data collection. Absolute player sovereignty.
 
 ---
-![image](assets/main_menu.png "Main Menu")
-![image](assets/in_game.png "In Game")
-![image](assets/creator.png "Creator")
+<p align="center">
+  <img src="assets/main_menu.png" width="32%" alt="Main Menu" title="Main Menu">
+  <img src="assets/in_game.png" width="32%" alt="In Game" title="In Game">
+  <img src="assets/creator.png" width="32%" alt="Creator" title="Creator">
+</p>
 
 ## Vision
 
